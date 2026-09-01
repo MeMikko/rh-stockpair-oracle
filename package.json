@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "description": "Stock-pair pricing oracle for Robinhood Chain (4663). Deterministic data path.",
   "scripts": {
     "verify:addresses": "tsx scripts/verify-addresses.ts",
@@ -12,7 +14,13 @@
     "index:watch": "tsx scripts/watch.ts",
     "serve": "tsx scripts/serve.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "corporate:sync": "tsx scripts/sync-corporate.ts",
+    "agent:scan": "tsx scripts/agent-scan.ts",
+    "agent:queue": "tsx scripts/agent-queue.ts",
+    "agent:approve": "tsx scripts/agent-decide.ts approve",
+    "agent:reject": "tsx scripts/agent-decide.ts reject",
+    "agent:publish": "tsx scripts/agent-publish.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",

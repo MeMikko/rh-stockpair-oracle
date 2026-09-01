@@ -37,7 +37,11 @@ export const STOCK_TOKEN_ABI = parseAbi([
   'function newUIMultiplier() view returns (uint256)',
   'function effectiveAt() view returns (uint256)',
   'function oraclePaused() view returns (bool)',
-  'event UIMultiplierUpdated(uint256 newMultiplier, uint256 effectiveAt)',
+  // Signatures per the ERC-8056 spec, not inferred: UIMultiplierUpdated carries
+  // three unindexed uints, and an announced action can be withdrawn, which a
+  // calendar has to reflect.
+  'event UIMultiplierUpdated(uint256 oldMultiplier, uint256 newMultiplier, uint256 effectiveAtTimestamp)',
+  'event UIMultiplierUpdateCancelled(uint256 cancelledMultiplier, uint256 cancelledEffectiveAt)',
 ]);
 
 export const AGGREGATOR_V3_ABI = parseAbi([

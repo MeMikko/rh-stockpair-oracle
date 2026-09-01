@@ -77,3 +77,49 @@ CREATE TABLE IF NOT EXISTS gas_samples (
   base_fee_per_gas      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS gas_samples_time ON gas_samples(observed_at);
+
+-- Corporate actions on the pricing assets. Sourced from Robinhood's published
+-- calendar; on this chain a dividend or split is applied through the ERC-8056
+-- uiMultiplier, so each one reprices every pool paired to that stock.
+CREATE TABLE IF NOT EXISTS corporate_actions (
+  id            TEXT PRIMARY KEY,
+  token_symbol  TEXT NOT NULL,
+  token_address TEXT,
+  type          TEXT NOT NULL,      -- CASH_DIVIDEND, SPLIT, ...
+  status        TEXT NOT NULL,      -- IN_PROGRESS | COMPLETED | ...
+  process_date  TEXT NOT NULL,      -- YYYY-MM-DD
+  detail_json   TEXT NOT NULL,
+  synced_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ca_date   ON corporate_actions(process_date);
+CREATE INDEX IF NOT EXISTS ca_symbol ON corporate_actions(token_symbol);
+
+-- Signals are deterministic observations worth telling someone about. The
+-- LLM never invents these; it only phrases one that already exists.
+CREATE TABLE IF NOT EXISTS signals (
+  id           TEXT PRIMARY KEY,    -- stable hash: same observation = same id
+  kind         TEXT NOT NULL,
+  severity     TEXT NOT NULL,       -- info | notable | high
+  summary      TEXT NOT NULL,
+  facts_json   TEXT NOT NULL,       -- every number a post may cite
+  reproduce    TEXT NOT NULL,       -- endpoint call that reproduces the claim
+  detected_at  INTEGER NOT NULL
+);
+
+-- Approval queue. Nothing reaches a public timeline without passing through
+-- here and being explicitly approved by a person.
+CREATE TABLE IF NOT EXISTS posts (
+  id           TEXT PRIMARY KEY,
+  signal_id    TEXT NOT NULL REFERENCES signals(id),
+  status       TEXT NOT NULL,       -- draft | approved | rejected | posted | failed
+  channels     TEXT NOT NULL,       -- csv: farcaster,x
+  draft_text   TEXT NOT NULL,
+  drafted_by   TEXT NOT NULL,       -- llm:<model> | template
+  created_at   INTEGER NOT NULL,
+  decided_at   INTEGER,
+  decided_by   TEXT,
+  posted_at    INTEGER,
+  post_refs    TEXT,
+  error        TEXT
+);
+CREATE INDEX IF NOT EXISTS posts_status ON posts(status);

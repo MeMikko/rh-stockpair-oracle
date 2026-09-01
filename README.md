@@ -3,7 +3,7 @@
 Pricing for Uniswap v4 pools on **Robinhood Chain (chain id 4663)** where one
 side is a tokenized stock or ETF. Deterministic: no model sits in the data path.
 
-Phases 1 and 2 are implemented: pool indexer, `GET /quote`, `POST /prepare-swap`, `GET /gas`.
+Phases 1-3 are implemented: pool indexer, `GET /quote`, `POST /prepare-swap`, `GET /gas`, `GET /corporate-actions`, and a public agent with a human approval queue.
 
 ## Why this exists
 
@@ -88,12 +88,15 @@ label where we know one; unknown hooks are expected and fine.
 `831310`, `890000` and `981310`. Anything assuming 500/3000/10000 is silently
 wrong, so fee comes from the event and, for dynamic pools, from live `slot0`.
 
-**Corporate actions are an on-chain read.** Stock tokens implement ERC-8056, so
-splits and dividends arrive as `uiMultiplier` changes with an `effectiveAt`
-timestamp rather than through a vendor calendar. Per Robinhood's docs the
-Chainlink feed already returns the multiplier-adjusted value, so the USD path
-never applies the multiplier a second time — it is surfaced in the response so
-a consumer can check that assumption.
+**Corporate actions: announced off-chain, applied on-chain.** Stock tokens
+implement ERC-8056, so splits and dividends land as `uiMultiplier` changes with
+an `effectiveAt` timestamp rather than as a rebase — and `/quote` reads that
+state directly per pool. Discovery is the other half: the multiplier only moves
+when the action takes effect, which is too late to warn anyone, so the forward
+calendar comes from Robinhood's published feed (see Phase 3 notes). Per
+Robinhood's docs the Chainlink feed already returns the multiplier-adjusted
+value, so the USD path never applies the multiplier a second time — it is
+surfaced in the response so a consumer can check that assumption.
 
 **PoolId is verified, not trusted.** Every indexed pool has its id recomputed
 from the PoolKey and asserted against the event. A mismatch throws, because a
@@ -103,7 +106,7 @@ wrong PoolKey would produce confidently wrong quotes.
 
 - [x] Phase 1 — indexer + `/quote` + `/coverage`
 - [x] Phase 2 — `/prepare-swap` + `/gas`
-- [ ] Phase 3 — corporate-action calendar, public agent with approval queue
+- [x] Phase 3 — corporate-action calendar + public agent with approval queue
 - [ ] Phase 4 — x402 Cloud deploy, skills-repo PR
 
 Never sends transactions and never holds funds.
@@ -181,3 +184,71 @@ length and last non-zero observation so a caller can judge for itself.
 Gas estimation executes the call, so a swap estimate needs a `from` that
 actually holds and has approved the token; without one the response explains
 that rather than reporting an opaque revert.
+
+## Phase 3 notes
+
+### `GET /corporate-actions`
+
+The calendar joined to the indexed pool set. Both halves are public; nothing
+else joins them — which is the point. On this chain a dividend or split is
+applied through the ERC-8056 `uiMultiplier`, so every pool quoted in that stock
+reprices at once.
+
+```bash
+curl 'localhost:8080/corporate-actions?withinDays=30&onlyAffecting=true'
+```
+
+Source is Robinhood's published `/rhj/corporate-actions`, not reconstructed from
+chain events: `UIMultiplierUpdated` only fires when the multiplier actually
+changes, which is far too late to warn anyone, and sweeping 194 tokens for rare
+events is not viable on the public RPC. On-chain `newUIMultiplier`/`effectiveAt`
+confirm an action once staged; they don't discover it.
+
+The ERC-8056 event signatures are taken from the spec, not inferred —
+`UIMultiplierUpdated(uint256 oldMultiplier, uint256 newMultiplier, uint256
+effectiveAtTimestamp)` takes three arguments, and an announced action can be
+withdrawn via `UIMultiplierUpdateCancelled`, which a calendar has to reflect.
+
+### The agent, and what stops it saying something false
+
+The data path stays deterministic. A **signal** is an observation the code made
+— an upcoming action touching N pools, the oracle coverage gap, a change in the
+gas subsidy — and each carries its facts plus the endpoint call that reproduces
+it. The model never decides *what* is true; it only phrases a signal that
+already exists, and phrasing is optional (templates cover every signal kind, so
+a missing API key degrades the prose, not the pipeline).
+
+Between the model and any timeline sits `verifyDraft`: **a draft may only contain
+numbers that appear in the signal's facts.** An invented pool count, a rounded
+rate or a derived percentage fails the check and the model's text is discarded
+in favour of the template, with the rejection reported rather than swallowed.
+This is what makes "every posted claim is reproducible from an endpoint
+response" enforceable instead of aspirational.
+
+The check caught its first real case during development — on our own template,
+which says "ERC-8056" and thus contained an `8056` that is not a fact. Standard
+identifiers (`ERC-8056`, `v4`, `chain 4663`) are now stripped before the numeric
+scan; a bare `8056` in a sentence about pool counts is still rejected, and there
+are tests for both.
+
+### Publishing is gated three ways
+
+```bash
+npm run agent:scan                  # detect signals, draft, queue as DRAFT
+npm run agent:queue                 # review
+npm run agent:approve -- <id>       # a person decides; the name is recorded
+npm run agent:publish               # dry run by default
+npm run agent:publish -- --live     # only now can anything be sent
+```
+
+Nothing is sent unless **all** of: the post is `approved`, credentials for the
+channel exist, and `--live` was passed. The default is a dry run, so an
+accidental invocation cannot reach a public timeline. One post per signal, so
+re-scanning never duplicates; an already-decided post cannot be revived.
+
+An approved post whose channel has no credentials is **skipped, not failed** —
+it stays approved for a later run rather than burning something a person already
+signed off on.
+
+X is dry-run only: posting needs OAuth 1.0a request signing, and a half-signed
+request that silently fails is worse than a channel that says it isn't wired up.
