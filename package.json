@@ -1,0 +1,27 @@
+{
+  "name": "rh-stockpair-oracle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "description": "Stock-pair pricing oracle for Robinhood Chain (4663). Deterministic data path.",
+  "scripts": {
+    "verify:addresses": "tsx scripts/verify-addresses.ts",
+    "registry:sync": "tsx scripts/sync-registry.ts",
+    "index:backfill": "tsx scripts/backfill.ts",
+    "index:watch": "tsx scripts/watch.ts",
+    "serve": "tsx scripts/serve.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "fastify": "^5.2.0",
+    "viem": "^2.56.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
