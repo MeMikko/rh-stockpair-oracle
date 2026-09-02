@@ -12,9 +12,9 @@ cost once billing is enabled (`x-oracle-price-usd`), what it cost you today
 headers rather than assuming.
 
 ```bash
-curl -s 'https://REPLACE-ME.example.com/quote?pool=0xPOOL_ID&size=1000'
-curl -s 'https://REPLACE-ME.example.com/corporate-actions?withinDays=30'
-curl -s -X POST https://REPLACE-ME.example.com/ask \
+curl -s 'https://oracle.sb4s.xyz/quote?pool=0xPOOL_ID&size=1000'
+curl -s 'https://oracle.sb4s.xyz/corporate-actions?withinDays=30'
+curl -s -X POST https://oracle.sb4s.xyz/ask \
   -H 'content-type: application/json' \
   -d '{"question":"when is the next NVDA dividend?"}'
 ```

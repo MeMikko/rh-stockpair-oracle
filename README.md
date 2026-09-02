@@ -244,7 +244,8 @@ answer is skipped rather than answered with a shrug.
       requests/window and the supplied key is not honoured by this instance)
 - [x] Phase 4 — deployment (`ops/`, `docs/DEPLOY.md`) and skill package (`skill/`)
 - [x] Phase 4 — pricing published per response, usage accounting
-- [ ] Phase 4 — fill the two placeholders, deploy, open the skills-repo PR
+- [x] Phase 4 — deployed to oracle.sb4s.xyz
+- [ ] Phase 4 — open the skills-repo PR
 - [ ] Wire an actual payment path (x402 or key-based) and flip `PRICING_MODE=paid`
 
 ## Pricing
@@ -298,9 +299,13 @@ approval queue, and sending still needs a person to approve one and run
 
 `skill/` is the package for a PR to
 [BankrBot/skills](https://github.com/BankrBot/skills) — `SKILL.md`,
-`catalog.json`, `logo.svg`, `README.md` in the layout that repo uses. It has
-one `REPLACE-ME` placeholder left — the public base URL — which has to be a
-real deployed host before it is submitted.
+`catalog.json`, `logo.svg`, `README.md` in the layout that repo uses.
+
+**Live at https://oracle.sb4s.xyz.** Deployed alongside an existing tenant on
+one box: the API binds the Docker network gateway, the site block is imported
+into the reverse proxy already serving that host, and a scoped ufw rule lets
+the proxy container reach the origin without opening the port to anything
+else.
 
 Never sends transactions and never holds funds.
 

@@ -7,10 +7,10 @@
   "demo": {
     "title": "quote.sh",
     "language": "bash",
-    "code": "curl -s 'https://REPLACE-ME.example.com/quote?pool=0xPOOL_ID&size=1000'\n\ncurl -s -X POST https://REPLACE-ME.example.com/ask \\n  -H 'content-type: application/json' \\n  -d '{\"question\":\"how many pools quote NVDA?\"}'"
+    "code": "curl -s 'https://oracle.sb4s.xyz/quote?pool=0xPOOL_ID&size=1000'\n\ncurl -s -X POST https://oracle.sb4s.xyz/ask \\n  -H 'content-type: application/json' \\n  -d '{\"question\":\"how many pools quote NVDA?\"}'"
   },
   "setup": [
-    "Base URL: https://REPLACE-ME.example.com — read-only, no key needed in launch mode",
+    "Base URL: https://oracle.sb4s.xyz — read-only, no key needed in launch mode",
     "NOT a free service: launch mode serves without charge; every response carries x-oracle-price-usd, x-oracle-charged-usd and x-oracle-pricing. Read them, do not hardcode a price",
     "Chain: Robinhood (4663) — abort if the Bankr wallet does not support 4663",
     "Covers Uniswap v4 AND v3: v3 carries ~37% of stock-paired volume, 3 of the top 5 pools",

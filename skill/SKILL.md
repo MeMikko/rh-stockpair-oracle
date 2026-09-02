@@ -11,7 +11,7 @@ Pricing for **Robinhood Chain (4663)** pools where one side is a tokenized
 stock or ETF. Deterministic: no model sits in the data path, and every response
 carries the facts behind it.
 
-**Base URL:** `https://REPLACE-ME.example.com`
+**Base URL:** `https://oracle.sb4s.xyz`
 **Source:** `https://github.com/MeMikko/rh-stockpair-oracle`
 
 **Pricing.** This is not a free service. It is currently in **launch mode**:
@@ -71,7 +71,7 @@ POST /ask                        free-text question, structured answer
 ### `GET /quote`
 
 ```bash
-curl 'https://REPLACE-ME.example.com/quote?pool=0x30e5…dced&size=1000'
+curl 'https://oracle.sb4s.xyz/quote?pool=0x30e5…dced&size=1000'
 ```
 
 Returns spot from `StateView.getSlot0`, implied USD of the paired token, price
@@ -105,7 +105,7 @@ treats a missing deviation as zero is wrong.
 ### `POST /prepare-swap`
 
 ```bash
-curl -X POST https://REPLACE-ME.example.com/prepare-swap \
+curl -X POST https://oracle.sb4s.xyz/prepare-swap \
   -H 'content-type: application/json' \
   -d '{"pool":"0x01c4…e7db","amountIn":"10000000000000000","zeroForOne":true,"slippageBps":50}'
 ```
@@ -142,7 +142,7 @@ window length and last non-zero observation so a caller can judge for itself.
 ### `GET /corporate-actions`
 
 ```bash
-curl 'https://REPLACE-ME.example.com/corporate-actions?withinDays=30&onlyAffecting=true'
+curl 'https://oracle.sb4s.xyz/corporate-actions?withinDays=30&onlyAffecting=true'
 ```
 
 The published calendar joined to the indexed pool set. Both halves are public;
@@ -157,7 +157,7 @@ far too late to warn anyone.
 ### `POST /ask`
 
 ```bash
-curl -X POST https://REPLACE-ME.example.com/ask \
+curl -X POST https://oracle.sb4s.xyz/ask \
   -H 'content-type: application/json' \
   -d '{"question":"how many pools quote NVDA?"}'
 ```
