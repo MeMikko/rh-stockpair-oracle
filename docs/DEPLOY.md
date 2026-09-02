@@ -205,10 +205,21 @@ docker inspect <caddy-container>   --format '{{range .NetworkSettings.Networks}}
 ```
 
 Set `HOST` to that address in `/opt/rh-oracle/.env` and point `reverse_proxy`
-at it. That address is reachable from containers and the host and is never
-routable from the internet, so the origin stays closed even if a firewall rule
-is later changed by mistake — which `HOST=0.0.0.0` plus a ufw rule would not
-survive.
+at it. That address is not routable from the internet, so the origin stays
+closed even if a firewall rule is later changed by mistake — which
+`HOST=0.0.0.0` plus a ufw rule would not survive.
+
+**An active ufw still blocks the container.** `default deny incoming` applies
+to the Docker bridge as well, so traffic from the proxy container to the host
+is dropped and Caddy reports `dial tcp <gateway>:8080: i/o timeout` — a
+timeout, not a refusal, which is the tell that packets are being dropped
+rather than the port being closed. Allow that one path, scoped to the
+network's own subnet so 8080 is not opened to anything else:
+
+```bash
+SUBNET=$(docker network inspect <compose-network>   --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+ufw allow from "$SUBNET" to any port 8080 proto tcp comment 'rh-oracle upstream from docker'
+```
 
 ### Behind Cloudflare
 

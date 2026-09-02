@@ -104,6 +104,14 @@ if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: a
 	ufw status numbered 2>/dev/null | sed 's/^/          /'
 	echo "          Confirm the existing project's ports are in that list before"
 	echo "          changing anything."
+	if command -v docker >/dev/null 2>&1 && [ -n "$(docker ps -q 2>/dev/null)" ]; then
+		if ! ufw status 2>/dev/null | grep -q '172\.'; then
+			warn "  no rule allows a Docker subnet to reach the host."
+			echo "          A containerised proxy will time out on the upstream until"
+			echo "          one exists:"
+			echo "            ufw allow from <docker-subnet> to any port 8080 proto tcp"
+		fi
+	fi
 else
 	warn "ufw inactive. Enabling it will drop every port you do not allow —"
 	echo "          list the other project's ports first."
