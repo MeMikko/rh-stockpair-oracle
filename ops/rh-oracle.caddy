@@ -13,6 +13,28 @@
 #
 # Replace the hostname below. A subdomain of a domain you already own is the
 # best option -- it needs one DNS A record and nothing else.
+#
+# BEHIND CLOUDFLARE
+#
+# If the A record is proxied (orange cloud), Caddy cannot complete an HTTP-01
+# or TLS-ALPN challenge: Cloudflare terminates 80/443 before Caddy sees them.
+# Three ways out, in order of preference:
+#
+#  1. Cloudflare Origin Certificate -- free, 15 years, trusted by Cloudflare
+#     only, which is all the origin needs. Replace the site's TLS line with:
+#         tls /etc/caddy/origin.pem /etc/caddy/origin.key
+#     Set the zone's SSL mode to FULL (STRICT).
+#
+#  2. Leave the record DNS-only (grey cloud). Caddy gets a normal Let's
+#     Encrypt certificate and Cloudflare is out of the path entirely.
+#
+#  3. DNS-01 via the Cloudflare plugin -- needs a custom Caddy build
+#     (xcaddy with caddy-dns/cloudflare), so only worth it if the proxy is
+#     required for other reasons.
+#
+# Never use Cloudflare's "Flexible" SSL mode: it fetches the origin over plain
+# HTTP, so calldata and pricing responses cross the last hop unencrypted, and
+# it produces redirect loops against a server that redirects to HTTPS.
 
 oracle.example.com {
 	encode zstd gzip
@@ -42,6 +64,14 @@ oracle.example.com {
 		health_uri /health
 		health_interval 30s
 	}
+
+	# Behind Cloudflare's proxy, restrict the origin to Cloudflare's ranges.
+	# Without this, anyone who finds the origin can reach it directly and set
+	# CF-Connecting-IP to whatever they like. Refresh the list from
+	# https://www.cloudflare.com/ips-v4 ; uncomment when the record is proxied.
+	#
+	# @notCloudflare not remote_ip 173.245.48.0/20 103.21.244.0/22 	#   103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 	#   190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 	#   162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22
+	# abort @notCloudflare
 
 	log {
 		output file /var/log/caddy/oracle.log

@@ -138,6 +138,42 @@ Both backfills commit their cursor after every range, so an interrupted run
 resumes where it stopped — just run it again. Run them under `tmux` or
 `systemd-run --scope` so an SSH drop does not kill them.
 
+### Behind Cloudflare
+
+A proxied A record (orange cloud) means Cloudflare terminates TLS at its edge,
+and three things follow.
+
+**The certificate.** Caddy cannot complete an HTTP-01 challenge through the
+proxy. Use a **Cloudflare Origin Certificate** (free, 15 years) with the zone
+set to **Full (strict)**, or leave the record DNS-only and let Caddy get a
+normal Let's Encrypt certificate. Never use **Flexible** SSL — it fetches the
+origin over plain HTTP, so swap calldata crosses the last hop unencrypted.
+
+**The caller's address.** Behind a proxy `req.ip` is Cloudflare's edge, not the
+caller's, so every caller collapses into a handful of IPs and the per-caller
+usage counts — the one number a pricing decision needs — become meaningless.
+Set:
+
+```
+TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip
+```
+
+The header is only honoured when that variable is set, because a forwarded
+header is caller-controlled: trusting one by default would let anyone who
+reaches the origin directly forge their identity. Pair it with the Cloudflare
+IP allowlist in `ops/rh-oracle.caddy`.
+
+**Caching.** Responses now carry explicit `Cache-Control`: `no-store`
+everywhere except `/coverage`. A cached `/quote` is a stale price presented as
+a live one, and a cached `/prepare-swap` is calldata whose min-out was derived
+from a market that has since moved. Do not add a Cloudflare cache rule that
+overrides this.
+
+One adoption caveat: Cloudflare's bot protection can challenge non-browser
+clients, and this service exists to be called by other agents. If Bot Fight
+Mode or a managed challenge is on for the zone, exempt the oracle hostname —
+otherwise the skill will look broken to exactly its intended audience.
+
 ### If there is no domain yet
 
 Caddy needs a DNS name to get a certificate; a bare IP cannot have one. To
