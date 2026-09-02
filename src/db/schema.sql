@@ -200,3 +200,27 @@ CREATE TABLE IF NOT EXISTS usage (
 );
 CREATE INDEX IF NOT EXISTS usage_day   ON usage(day);
 CREATE INDEX IF NOT EXISTS usage_route ON usage(route);
+
+-- Who has paid for what.
+--
+-- Deliberately the narrowest possible memory: it records entitlement, not
+-- conversation. The agent still cannot remember what anyone told it, which is
+-- what keeps it unpersuadable -- an agent that remembers claims can be taught
+-- to believe one. This table only answers "is this subject entitled, and until
+-- when".
+--
+-- A subject is a Farcaster FID or a wallet address. Which one matters for
+-- trust, not just identity: an FID arriving from Neynar's API is asserted by
+-- Neynar, while an address or FID arriving in an HTTP request is asserted by
+-- whoever made the request. See src/entitlements/index.ts.
+CREATE TABLE IF NOT EXISTS entitlements (
+  subject_type TEXT NOT NULL,      -- fid | address
+  subject      TEXT NOT NULL,      -- fid: digits; address: lowercase 0x…
+  tier         TEXT NOT NULL,      -- pro
+  granted_at   INTEGER NOT NULL,
+  expires_at   INTEGER,            -- NULL = does not expire
+  source       TEXT NOT NULL,      -- manual | payment:<ref>
+  note         TEXT,
+  PRIMARY KEY (subject_type, subject)
+);
+CREATE INDEX IF NOT EXISTS entitlements_tier ON entitlements(tier, expires_at);

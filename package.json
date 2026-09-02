@@ -27,7 +27,8 @@
     "holders:sync": "node --env-file-if-exists=.env --import tsx scripts/sync-holders.ts",
     "agent:listen": "node --env-file-if-exists=.env --import tsx scripts/agent-listen.ts",
     "sync:all": "node --env-file-if-exists=.env --import tsx scripts/sync-all.ts",
-    "usage": "node --env-file-if-exists=.env --import tsx scripts/usage.ts"
+    "usage": "node --env-file-if-exists=.env --import tsx scripts/usage.ts",
+    "ent": "node --env-file-if-exists=.env --import tsx scripts/entitlement.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",
