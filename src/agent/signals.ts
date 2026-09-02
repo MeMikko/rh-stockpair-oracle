@@ -72,7 +72,14 @@ export function detectCorporateActions(t: Thresholds = DEFAULT_THRESHOLDS, now =
   return upcomingActions(t.actionHorizonDays, now)
     .filter((a) => a.status !== 'COMPLETED' && a.affectedPools >= t.minAffectedPools)
     .map((a) => ({
-      id: signalId('corporate_action', `${a.id}:${a.processDate}:${a.affectedPools}`),
+      // Keyed on the action's identity alone. affectedPools used to be part
+      // of this, which meant a new signal -- and a new queued draft -- every
+      // time the tip follower indexed another pool quoting that stock. The
+      // count changes continuously, so the same dividend was re-queued on
+      // every scan and the review queue filled with near-duplicates of one
+      // event. One action is one post; the count it cites is whatever was
+      // true when the draft was written.
+      id: signalId('corporate_action', `${a.id}:${a.processDate}`),
       kind: 'corporate_action',
       severity: (a.affectedPools >= 5 ? 'high' : 'notable') as Severity,
       summary: `${a.tokenSymbol} ${a.type.toLowerCase().replace('_', ' ')} on ${a.processDate} reprices ${a.affectedPools} indexed pool(s)`,
