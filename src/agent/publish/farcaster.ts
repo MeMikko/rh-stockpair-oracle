@@ -42,7 +42,10 @@ export const farcaster: Publisher = {
 
     let res: Response;
     try {
-      res = await fetch('https://api.neynar.com/v2/farcaster/cast', {
+      // Trailing slash as published in the OpenAPI spec. A POST that gets
+      // redirected can lose its body in some clients, so the documented path
+      // is used verbatim rather than the one that merely usually works.
+      res = await fetch('https://api.neynar.com/v2/farcaster/cast/', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -71,15 +74,37 @@ export const farcaster: Publisher = {
     }
 
     if (!res.ok) {
+      // Neynar returns a structured ErrorRes ({message, code, property}).
+      // Surfacing `message` rather than a truncated blob is the difference
+      // between "signer not approved" and a wall of JSON at 3am.
+      const raw = await res.text();
+      let detail = raw.slice(0, 200);
+      try {
+        const e = JSON.parse(raw) as { message?: string; code?: string };
+        if (e.message) detail = e.code ? `${e.message} (${e.code})` : e.message;
+      } catch {
+        /* not JSON; the raw body is the best we have */
+      }
       return {
         channel: 'farcaster',
         ref: null,
         dryRun: false,
-        error: `neynar ${res.status}: ${(await res.text()).slice(0, 200)}`,
+        error: `neynar ${res.status}: ${detail}`,
       };
     }
 
-    const body = (await res.json()) as { cast?: { hash?: string } };
-    return { channel: 'farcaster', ref: body.cast?.hash ?? null, dryRun: false };
+    // PostCastResponse is { success, cast: { hash, author: { fid }, text } }.
+    // A 200 without a hash would mean the cast was not actually created, so
+    // it is treated as a failure rather than recorded as a send.
+    const body = (await res.json()) as { success?: boolean; cast?: { hash?: string } };
+    if (!body.cast?.hash) {
+      return {
+        channel: 'farcaster',
+        ref: null,
+        dryRun: false,
+        error: 'neynar returned 200 without a cast hash',
+      };
+    }
+    return { channel: 'farcaster', ref: body.cast.hash, dryRun: false };
   },
 };

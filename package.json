@@ -28,7 +28,8 @@
     "agent:listen": "node --env-file-if-exists=.env --import tsx scripts/agent-listen.ts",
     "sync:all": "node --env-file-if-exists=.env --import tsx scripts/sync-all.ts",
     "usage": "node --env-file-if-exists=.env --import tsx scripts/usage.ts",
-    "ent": "node --env-file-if-exists=.env --import tsx scripts/entitlement.ts"
+    "ent": "node --env-file-if-exists=.env --import tsx scripts/entitlement.ts",
+    "neynar:check": "node --env-file-if-exists=.env --import tsx scripts/neynar-check.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",

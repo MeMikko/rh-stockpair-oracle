@@ -37,9 +37,16 @@ export function neynarConfigured(): boolean {
 /**
  * Recent mentions of the agent's FID.
  *
- * Reads only; posting a reply is a separate, approval-gated step. The cursor
- * is deliberately not stored on the Neynar side -- dedupe is local, keyed on
- * cast hash, so a restart or a re-run cannot double-answer.
+ * Reads only; sending a reply is a separate step. The cursor is deliberately
+ * not stored on the Neynar side -- dedupe is local, keyed on cast hash, so a
+ * restart or a re-run cannot double-answer.
+ *
+ * UNVERIFIED against the published spec, unlike the cast endpoint: the
+ * response shape below (`notifications[].cast`) was written from the API's
+ * general shape, not from Neynar's OpenAPI document. A field name that is
+ * wrong here fails closed -- the filter drops casts missing a hash or text, so
+ * the agent finds no mentions rather than mishandling one -- but the first
+ * live run should be checked against real output before autonomy is enabled.
  */
 export async function fetchMentions(fid: string, limit = 25): Promise<Mention[]> {
   if (!neynarConfigured()) throw new Error('NEYNAR_API_KEY is not set');
