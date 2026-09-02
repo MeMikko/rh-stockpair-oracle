@@ -29,11 +29,15 @@ import { agentIdentity } from '../../config/agent.js';
 
 export const conversationalConfig = {
   /**
-   * 'off' keeps the canned refusal. 'pro' answers entitled callers only.
-   * 'all' opens it to everyone -- worth doing once the behaviour is known,
-   * not before.
+   * Defaults to 'pro': someone who paid should get an answer to an
+   * open-ended question without an operator having to enable it first. The
+   * safety argument for defaulting closed was about opening this to
+   * everyone, and 'all' still requires that decision to be made explicitly.
+   *
+   * 'off' remains as a kill switch that silences the model for everyone,
+   * including subscribers.
    */
-  mode: (process.env.ASK_LLM_MODE?.trim() as 'off' | 'pro' | 'all') || 'off',
+  mode: (process.env.ASK_LLM_MODE?.trim() as 'off' | 'pro' | 'all') || 'pro',
   baseUrl: process.env.BANKR_LLM_BASE_URL ?? 'https://llm.bankr.bot',
   apiKey: process.env.BANKR_LLM_API_KEY ?? '',
   model: process.env.BANKR_LLM_MODEL ?? 'claude-sonnet-5',

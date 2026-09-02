@@ -5,6 +5,7 @@ import { verifyDraft } from '../../agent/verify.js';
 import { enqueue } from '../../agent/queue.js';
 import { saveMentionSignal, signalForMention, type Mention } from '../../agent/mentions.js';
 import { decide, recordAutoReply, alreadyAutoReplied } from '../../agent/autonomy.js';
+import { tierForFid } from '../../entitlements/index.js';
 import { farcaster } from '../../agent/publish/farcaster.js';
 
 /**
@@ -136,10 +137,15 @@ export function registerWebhook(app: FastifyInstance): void {
     if (!mention) return { ok: true, ignored: 'not a cast.created mention' };
     if (alreadyAutoReplied(mention.hash)) return { ok: true, ignored: 'already answered' };
 
-    const { signal, answered } = await signalForMention(mention);
-    const verdict = decide({ fid: mention.authorFid, answered });
+    const { signal, answered, conversational } = await signalForMention(mention);
+    // Worth saying, rather than looked up. An introduction is not a
+    // measurement -- `answered` stays false so no caller reads it as one --
+    // but staying silent when the agent has a good reply is the wrong
+    // outcome, so the gate asks whether there is something to say.
+    const worthSaying = answered || conversational;
+    const verdict = decide({ fid: mention.authorFid, answered: worthSaying });
 
-    if (!answered) {
+    if (!worthSaying) {
       // The text is logged because this is the branch that needs diagnosing:
       // an unanswerable mention is either genuinely off-topic or a classifier
       // gap, and those are indistinguishable without seeing what was asked.
@@ -150,7 +156,8 @@ export function registerWebhook(app: FastifyInstance): void {
       return { ok: true, ignored: 'not answerable' };
     }
 
-    const a = await answerQuestion(mention.text);
+    const tier = mention.authorFid ? tierForFid(mention.authorFid).tier : 'free';
+    const a = await answerQuestion(mention.text, new Date(), { tier });
     const verification = verifyDraft(a.text, signal.facts);
     if (!verification.ok) {
       req.log.error(

@@ -31,6 +31,14 @@ export interface Answer {
   reproduce: string;
   /** False when the question could not be classified or the data is absent. */
   answered: boolean;
+  /**
+   * True when a model wrote the reply on the fallback path.
+   *
+   * Separate from `answered` because they mean different things and a caller
+   * needs both: nothing was looked up (so this is not a measurement), but
+   * there is still something worth saying (so silence would be wrong).
+   */
+  conversational?: boolean;
 }
 
 const NO_IDEA =
@@ -310,8 +318,10 @@ export async function answerQuestion(
           reproduce: 'GET /health',
           // Still false: nothing was looked up. The reply explains the
           // service rather than answering a data question, and a caller
-          // should not treat it as a measurement.
+          // should not treat it as a measurement. `conversational` is what
+          // tells the reply path there is something worth saying anyway.
           answered: false,
+          conversational: true,
         };
       }
       if (c.rejected) {

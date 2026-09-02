@@ -24,7 +24,13 @@ afterEach(() => {
 });
 
 describe('conversational fallback', () => {
-  it('is off unless enabled, whatever the model would say', async () => {
+  it('defaults to answering subscribers', async () => {
+    // A person who paid should not need an operator to enable this first.
+    const fresh = (process.env.ASK_LLM_MODE?.trim() as string) || 'pro';
+    expect(fresh).toBe('pro');
+  });
+
+  it('can be silenced entirely, subscribers included', async () => {
     conversationalConfig.mode = 'off';
     const r = await conversationalAnswer('introduce yourself', FALLBACK);
     expect(r.usedModel).toBe(false);

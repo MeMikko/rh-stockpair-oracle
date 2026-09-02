@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { getDb } from '../db/index.js';
 import { answerQuestion } from '../answer/answer.js';
+import { tierForFid } from '../entitlements/index.js';
 import { saveSignals, type Signal } from './signals.js';
 
 /**
@@ -107,12 +108,19 @@ export function unanswered(mentions: Mention[]): Mention[] {
  * approval, publishing. The id is keyed on the cast hash so one mention can
  * only ever produce one reply.
  */
-export async function signalForMention(m: Mention): Promise<{ signal: Signal; answered: boolean }> {
-  const a = await answerQuestion(m.text);
+export async function signalForMention(
+  m: Mention,
+): Promise<{ signal: Signal; answered: boolean; conversational: boolean }> {
+  // The asker's tier decides whether the model may answer an open-ended
+  // question. Without passing it, a pro subscriber tagging the agent got the
+  // canned refusal that a stranger gets.
+  const tier = m.authorFid ? tierForFid(m.authorFid).tier : 'free';
+  const a = await answerQuestion(m.text, new Date(), { tier });
   const id = createHash('sha256').update(`mention:${m.hash}`).digest('hex').slice(0, 16);
 
   return {
     answered: a.answered,
+    conversational: Boolean(a.conversational),
     signal: {
       id,
       kind: 'mention_answer',

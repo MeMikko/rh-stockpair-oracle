@@ -10,6 +10,7 @@ import {
   type Mention,
 } from '../src/agent/mentions.js';
 import { autonomyConfig, decide, recordAutoReply } from '../src/agent/autonomy.js';
+import { tierForFid } from '../src/entitlements/index.js';
 import { farcaster } from '../src/agent/publish/farcaster.js';
 
 /**
@@ -81,18 +82,20 @@ async function pass(): Promise<number> {
 
   let handled = 0;
   for (const m of fresh) {
-    const { signal, answered } = await signalForMention(m);
-    const verdict = decide({ fid: m.authorFid, answered });
+    const { signal, answered, conversational } = await signalForMention(m);
+    const worthSaying = answered || conversational;
+    const verdict = decide({ fid: m.authorFid, answered: worthSaying });
 
     // An unanswerable mention is neither sent nor queued. Replying "I don't
     // know" to every passing mention would make the account noise, and there
     // is nothing for a person to approve either.
-    if (!answered) {
+    if (!worthSaying) {
       console.log(`SKIP  @${m.author}: ${verdict.reason}`);
       continue;
     }
 
-    const a = await answerQuestion(m.text);
+    const tier = m.authorFid ? tierForFid(m.authorFid).tier : 'free';
+    const a = await answerQuestion(m.text, new Date(), { tier });
     const verification = verifyDraft(a.text, signal.facts);
     if (!verification.ok) {
       // A template failing verification is a bug, not a rejection, so it is
