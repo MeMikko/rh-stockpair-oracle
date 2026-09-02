@@ -65,6 +65,11 @@ const IDENTIFIER_PATTERNS: RegExp[] = [
   // scan: it passed only while nonZeroSamples happened to equal 1, and began
   // failing verification the moment that count moved.
   /\bL[12]\b/gi,
+  // Hostnames and URLs. `oracle.sb4s.xyz` contains a 4 that measures nothing,
+  // and a post that cannot name where the service lives is not much of an
+  // announcement. Anchored on a letters-only TLD so a decimal like `2.50`
+  // cannot hide inside this pattern.
+  /\b(?:https?:\/\/)?[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)*\.[a-z]{2,24}\b(?:\/\S*)?/gi,
 ];
 
 function stripIdentifiers(text: string): string {

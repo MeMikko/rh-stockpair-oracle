@@ -4,6 +4,7 @@ import { upcomingActions } from '../corporate/calendar.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { readGas } from '../pricing/gas.js';
 import { marketStatus } from '../pricing/marketHours.js';
+import { agentIdentity } from '../../config/agent.js';
 
 export type Severity = 'info' | 'notable' | 'high';
 
@@ -145,6 +146,54 @@ export function detectCoverage(): Signal[] {
       coveragePercent: Number((c.coverageRatio * 100).toFixed(1)),
     },
     reproduce: 'GET /coverage',
+    detectedAt: Date.now(),
+  }];
+}
+
+/**
+ * The service introducing itself.
+ *
+ * An account's first post has to say what it is, and this one has to do it the
+ * same way as every other: from facts, through the verifier, into the approval
+ * queue. Writing an announcement by hand would be the one post on the feed
+ * nobody could reproduce -- which is precisely the property the feed claims.
+ *
+ * Keyed on the rounded pool count so it does not re-queue on every scan as the
+ * index grows by a few hundred pools.
+ */
+export function detectIntroduction(): Signal[] {
+  const db = getDb();
+  const n = (sql: string): number => {
+    try {
+      return Number((db.prepare(sql).get() as { n: number }).n);
+    } catch {
+      return 0;
+    }
+  };
+  const c = computeCoverage();
+  const v4 = n("SELECT COUNT(*) AS n FROM pools WHERE quote_kind = 'stock'");
+  const v3 = n("SELECT COUNT(*) AS n FROM pools_v3 WHERE quote_kind = 'stock'");
+  if (v4 + v3 === 0) return [];
+
+  const totalPools = n('SELECT COUNT(*) AS n FROM pools') + n('SELECT COUNT(*) AS n FROM pools_v3');
+
+  return [{
+    id: signalId('service_intro', `${Math.round((v4 + v3) / 1000)}k`),
+    kind: 'service_intro',
+    severity: 'high',
+    summary: `${agentIdentity.name} introduces the ${agentIdentity.service}`,
+    facts: {
+      name: agentIdentity.name,
+      url: 'oracle.sb4s.xyz',
+      stockPairedV4: v4,
+      stockPairedV3: v3,
+      stockPaired: v4 + v3,
+      totalPools,
+      stockTokens: c.total,
+      tokensWithFeed: c.covered.length,
+      tokensWithoutFeed: c.uncovered.length,
+    },
+    reproduce: 'GET /health',
     detectedAt: Date.now(),
   }];
 }

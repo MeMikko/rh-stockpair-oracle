@@ -34,6 +34,13 @@ export function templateDraft(signal: Signal): string {
       return `${f.uncovered} of ${f.total} Robinhood Chain stock tokens have no Chainlink feed ` +
              `(${f.coveragePercent}% covered). For those, a pool's deviation from the underlying ` +
              `price is not just unknown, it is unknowable on-chain.`;
+    case 'service_intro':
+      // Says what it is, what it covers, where it lives, and the one thing
+      // that distinguishes it. No superlatives: the numbers are the claim.
+      return `I read Robinhood Chain pools where one side is a tokenized stock. ` +
+             `${f.stockPaired} stock-paired pools indexed across Uniswap v4 and v3 — ` +
+             `most tools cover v4 only. ${f.tokensWithoutFeed} of ${f.stockTokens} stock ` +
+             `tokens have no Chainlink feed, so I say so rather than guess. ${f.url}`;
     case 'protocol_split':
       // Every number here appears verbatim in the signal's facts; nothing is
       // derived at drafting time, so the verifier passes the template. The

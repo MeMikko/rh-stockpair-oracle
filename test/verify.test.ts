@@ -145,3 +145,23 @@ describe('layer identifiers', () => {
     expect(r.unsupported).toContain('7');
   });
 });
+
+describe('hostnames', () => {
+  const facts = { v3SharePercent: 36, totalPools: 1008633 };
+
+  it('does not read the 4 in a hostname as a claimed number', () => {
+    const r = verifyDraft('Live at oracle.sb4s.xyz — v3 carries 36% of volume.', facts);
+    expect(r.unsupported).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+
+  it('still rejects an invented number alongside a URL', () => {
+    const r = verifyDraft('oracle.sb4s.xyz indexes 999 pools.', facts);
+    expect(r.unsupported).toContain('999');
+  });
+
+  it('does not let a decimal hide inside the hostname pattern', () => {
+    // The TLD must be letters, so `2.50` is never treated as a domain.
+    expect(verifyDraft('the price is 2.50', facts).unsupported).toContain('2.50');
+  });
+});
