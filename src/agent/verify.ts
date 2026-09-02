@@ -60,6 +60,11 @@ const IDENTIFIER_PATTERNS: RegExp[] = [
   /\bv[2-4]\b/gi,
   /\bchain(?:\s+id)?\s+4663\b/gi,
   /\bRobinhood\s+Chain\b/gi,
+  // "L1" and "L2" name the layer, not a quantity. Without this the gas
+  // template's "charging for L1 data" contributed a bare 1 to the numeric
+  // scan: it passed only while nonZeroSamples happened to equal 1, and began
+  // failing verification the moment that count moved.
+  /\bL[12]\b/gi,
 ];
 
 function stripIdentifiers(text: string): string {

@@ -1,5 +1,5 @@
 import { fetchCorporateActions, saveCorporateActions } from '../src/corporate/calendar.js';
-import { detectCorporateActions, detectCoverage, detectGasSubsidy, saveSignals, type Signal } from '../src/agent/signals.js';
+import { detectCorporateActions, detectCoverage, detectGasSubsidy, detectProtocolSplit, saveSignals, type Signal } from '../src/agent/signals.js';
 import { draftPost } from '../src/agent/draft.js';
 import { enqueue } from '../src/agent/queue.js';
 
@@ -12,6 +12,7 @@ console.log(`corporate actions synced: ${actions.length}`);
 const signals: Signal[] = [
   ...detectCorporateActions(),
   ...detectCoverage(),
+  ...(await detectProtocolSplit()),
   ...(await detectGasSubsidy()),
 ];
 const { inserted } = saveSignals(signals);

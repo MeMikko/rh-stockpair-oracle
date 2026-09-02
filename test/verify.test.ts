@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { verifyDraft, allowedNumbers, MAX_POST_LENGTH } from '../src/agent/verify.js';
+import { templateDraft } from '../src/agent/draft.js';
 
 const facts = {
   symbol: 'MSFT', actionType: 'CASH_DIVIDEND', processDate: '2026-09-10',
@@ -78,5 +79,69 @@ describe('identifier handling', () => {
     const r = verifyDraft('There are 8056 pools affected.', f);
     expect(r.ok).toBe(false);
     expect(r.unsupported).toContain('8056');
+  });
+});
+
+/**
+ * Every template must satisfy the same guard rail the model's output does.
+ * A template that quietly derives a number would pass review by looking
+ * plausible and then fail verification only in production, where the effect
+ * is a signal that never publishes.
+ */
+describe('protocol_split template', () => {
+  const splitFacts = {
+    v3SharePercent: 37,
+    v3VolumeUsdMillions: 151.6,
+    v4VolumeUsdMillions: 257.9,
+    totalVolumeUsdMillions: 409.5,
+    windowHours: 24.1,
+    v3Pools: 1104,
+    v4Pools: 1652,
+    topPoolByUsdProtocol: 'v4',
+    topPoolByUsdSymbol: 'CRCL',
+    topPoolByUsdMillions: 43.5,
+    fromBlock: 51543684,
+    toBlock: 52401168,
+  };
+
+  it('passes verification with only facts-backed numbers', () => {
+    const text = templateDraft({
+      id: 'x', kind: 'protocol_split', severity: 'high',
+      summary: 'split', facts: splitFacts, reproduce: 'npm run volume:sync',
+      detectedAt: 0,
+    });
+    const r = verifyDraft(text, splitFacts);
+    expect(r.unsupported).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+
+  it('does not claim the biggest pool is v3', () => {
+    // Ranking by USD and by swap count pick different pools, so no published
+    // claim may rest on which protocol holds "the most-traded" one.
+    const text = templateDraft({
+      id: 'x', kind: 'protocol_split', severity: 'high',
+      summary: 'split', facts: splitFacts, reproduce: 'npm run volume:sync',
+      detectedAt: 0,
+    });
+    expect(text).not.toMatch(/most[- ]traded/i);
+    expect(text).toContain('37%');
+  });
+});
+
+describe('layer identifiers', () => {
+  const gasFacts = { nonZeroSamples: 3, samples: 12, windowSeconds: 900 };
+
+  it('does not read the 1 in "L1" as a claimed number', () => {
+    const r = verifyDraft(
+      'Robinhood Chain is charging for L1 data in 3 of the last 12 samples.',
+      gasFacts,
+    );
+    expect(r.unsupported).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+
+  it('still rejects a real invented number alongside L1', () => {
+    const r = verifyDraft('L1 data charged in 7 of the last 12 samples.', gasFacts);
+    expect(r.unsupported).toContain('7');
   });
 });

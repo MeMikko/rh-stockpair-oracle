@@ -39,9 +39,20 @@ export interface Thresholds {
 
 export const DEFAULT_THRESHOLDS: Thresholds = {
   deviationFraction: 0.02,
-  actionHorizonDays: 7,
+  // 30 days, not 7. At 7 the scanner missed the largest action on the chain:
+  // NVDA's 2026-10-01 dividend reprices 9,228 indexed pools and sat 29 days
+  // out. A corporate action is useful precisely because it is known in
+  // advance, so a horizon shorter than the announcement lead time throws away
+  // the signal's whole advantage.
+  actionHorizonDays: 30,
   minAffectedPools: 1,
 };
+
+/**
+ * Minimum share the smaller protocol must hold before the split is worth
+ * saying out loud. Below this it is a footnote, not a finding.
+ */
+const PROTOCOL_SPLIT_MIN_SHARE = 0.1;
 
 /**
  * Corporate action approaching on a stock that prices indexed pools.
@@ -121,6 +132,70 @@ export function detectCoverage(): Signal[] {
       coveragePercent: Number((c.coverageRatio * 100).toFixed(1)),
     },
     reproduce: 'GET /coverage',
+    detectedAt: Date.now(),
+  }];
+}
+
+/**
+ * How stock-paired volume splits between Uniswap v3 and v4.
+ *
+ * This is the signal the project got wrong about itself. `config/addresses.ts`
+ * described v3 as "a small minority of stock-paired liquidity" on no
+ * measurement at all, and the indexer covered only v4 -- so a third of the
+ * subject was invisible while the README claimed the pool set. Once both
+ * protocols are indexed the split is a fact worth publishing, because every
+ * other RH data source still reports v4 alone.
+ *
+ * Fires only when the smaller protocol clears PROTOCOL_SPLIT_MIN_SHARE, and is
+ * keyed on the rounded share so a drifting percentage does not re-queue a post
+ * that says the same thing.
+ */
+export async function detectProtocolSplit(): Promise<Signal[]> {
+  const { buildVolumeReport } = await import('../volume/usd.js');
+  const rep = await buildVolumeReport();
+  if (rep.pools.length === 0 || rep.totalUsd <= 0) return [];
+
+  let v4 = 0, v3 = 0, v4Pools = 0, v3Pools = 0;
+  let top: (typeof rep.pools)[number] | null = null;
+  for (const p of rep.pools) {
+    if (p.volumeUsd === null) continue;
+    if (p.protocol === 'v4') { v4 += p.volumeUsd; v4Pools++; } else { v3 += p.volumeUsd; v3Pools++; }
+    if (!top || p.volumeUsd > (top.volumeUsd ?? 0)) top = p;
+  }
+  const total = v4 + v3;
+  if (total <= 0 || !top) return [];
+
+  const minorShare = Math.min(v4, v3) / total;
+  if (minorShare < PROTOCOL_SPLIT_MIN_SHARE) return [];
+
+  // Rounded to the precision a post would actually use, so the facts contain
+  // exactly the numbers the text is allowed to cite and nothing has to be
+  // derived at drafting time.
+  const round1 = (n: number) => Number(n.toFixed(1));
+  const v3Share = Math.round((v3 / total) * 100);
+
+  return [{
+    id: signalId('protocol_split', String(v3Share)),
+    kind: 'protocol_split',
+    severity: 'high',
+    summary: `Uniswap v3 carries ${v3Share}% of stock-paired volume on Robinhood Chain`,
+    facts: {
+      v3SharePercent: v3Share,
+      v3VolumeUsdMillions: round1(v3 / 1e6),
+      v4VolumeUsdMillions: round1(v4 / 1e6),
+      totalVolumeUsdMillions: round1(total / 1e6),
+      windowHours: round1(rep.hours),
+      v3Pools, v4Pools,
+      // Largest single pool by USD volume. Note this is a different pool
+      // from the largest by swap count -- which is why no published claim
+      // rests on "the most-traded pool" without naming the metric.
+      topPoolByUsdProtocol: top.protocol,
+      topPoolByUsdSymbol: top.stockSymbol,
+      topPoolByUsdMillions: round1((top.volumeUsd ?? 0) / 1e6),
+      fromBlock: rep.fromBlock,
+      toBlock: rep.toBlock,
+    },
+    reproduce: 'npm run volume:sync',
     detectedAt: Date.now(),
   }];
 }

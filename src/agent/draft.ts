@@ -34,6 +34,15 @@ export function templateDraft(signal: Signal): string {
       return `${f.uncovered} of ${f.total} Robinhood Chain stock tokens have no Chainlink feed ` +
              `(${f.coveragePercent}% covered). For those, a pool's deviation from the underlying ` +
              `price is not just unknown, it is unknowable on-chain.`;
+    case 'protocol_split':
+      // Every number here appears verbatim in the signal's facts; nothing is
+      // derived at drafting time, so the verifier passes the template. The
+      // claim rests on the share alone -- deliberately not on which protocol
+      // holds the single biggest pool, since ranking by USD and by swap count
+      // pick different pools.
+      return `Uniswap v3 carries ${f.v3SharePercent}% of stock-paired swap volume on ` +
+             `Robinhood Chain: $${f.v3VolumeUsdMillions}M of $${f.totalVolumeUsdMillions}M ` +
+             `over ${f.windowHours}h. An index that covers only v4 misses all of it.`;
     case 'gas_subsidy':
       return `Robinhood Chain is charging for L1 data in ${f.nonZeroSamples} of the last ` +
              `${f.samples} samples. The launch gas subsidy appears to be ending.`;
