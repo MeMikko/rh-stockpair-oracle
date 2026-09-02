@@ -9,18 +9,31 @@ import {
   unanswered,
   type Mention,
 } from '../src/agent/mentions.js';
+import { autonomyConfig, decide, recordAutoReply } from '../src/agent/autonomy.js';
+import { farcaster } from '../src/agent/publish/farcaster.js';
 
 /**
- * Poll Farcaster mentions and queue a reply to each, for human approval.
+ * Poll Farcaster mentions and answer them.
  *
- * The agent answers, but it never answers on its own authority: a reply is a
- * public claim from the same account that publishes the feed, so it lands in
- * the same queue behind the same approval as a broadcast. This script only
- * ever writes drafts.
+ * By default every reply is queued for a person, exactly as a broadcast is.
+ * With AGENT_AUTONOMOUS_REPLIES=pro, a mention from an entitled FID is
+ * answered directly instead — and only that case. Everyone else still queues.
+ *
+ * Replying autonomously is defensible where posting autonomously is not: a
+ * post is the agent's own claim that nobody asked for, while a reply is a
+ * lookup somebody requested, produced by a path with no model in it and
+ * checked by verifyDraft before it leaves. Broadcasts remain gated on a human
+ * regardless of this setting.
  *
  *   npm run agent:listen                    # one pass over recent mentions
  *   npm run agent:listen -- --watch         # keep polling
  *   npm run agent:listen -- --question="how many pools quote NVDA"
+ *   npm run agent:listen -- --dry-run       # decide, but send nothing
+ *
+ * A pro subscriber's mention can be answered without approval when
+ * AGENT_AUTONOMOUS_REPLIES=pro; everyone else is queued as before. See
+ * src/agent/autonomy.ts for why replying is a different proposition from
+ * posting, and for the gates -- all of which default closed.
  */
 const arg = (n: string): string | undefined =>
   process.argv.find((a) => a.startsWith(`--${n}=`))?.split('=').slice(1).join('=');
@@ -28,6 +41,7 @@ const flag = (n: string): boolean => process.argv.includes(`--${n}`);
 
 const channels = (process.env.AGENT_CHANNELS ?? 'farcaster')
   .split(',').map((s) => s.trim()).filter(Boolean);
+const dryRun = flag('dry-run');
 
 // Offline path: exercise the answer pipeline without touching Neynar. Useful
 // for checking what the agent would say before pointing it at a real account.
@@ -65,25 +79,52 @@ async function pass(): Promise<number> {
   const fresh = unanswered(mentions);
   if (fresh.length === 0) return 0;
 
-  let queued = 0;
+  let handled = 0;
   for (const m of fresh) {
     const { signal, answered } = await signalForMention(m);
+    const verdict = decide({ fid: m.authorFid, answered });
 
-    // An unanswerable mention is not queued. Replying "I don't know" to every
-    // passing mention would make the account noise, and the queue is for
-    // things a person might actually want to send.
+    // An unanswerable mention is neither sent nor queued. Replying "I don't
+    // know" to every passing mention would make the account noise, and there
+    // is nothing for a person to approve either.
     if (!answered) {
-      console.log(`SKIP  @${m.author}: not a question this agent can answer`);
+      console.log(`SKIP  @${m.author}: ${verdict.reason}`);
       continue;
     }
 
     const a = await answerQuestion(m.text);
     const verification = verifyDraft(a.text, signal.facts);
     if (!verification.ok) {
+      // A template failing verification is a bug, not a rejection, so it is
+      // loud -- and it blocks the autonomous path exactly as firmly as the
+      // queued one. Nothing unverified is sent, approved or not.
       console.error(
         `SKIP  @${m.author}: answer failed verification ` +
           `(unsupported: ${verification.unsupported.join(', ') || 'none'})`,
       );
+      continue;
+    }
+
+    if (verdict.autonomous) {
+      if (dryRun) {
+        console.log(`WOULD SEND  reply to @${m.author}  [${a.intent.kind}] — ${verdict.reason}`);
+        console.log(`      A: ${a.text}\n`);
+        handled++;
+        continue;
+      }
+      const res = await farcaster.publish(a.text, false, m.hash);
+      if (res.error) {
+        // A failed send is not recorded as sent, so the next pass retries
+        // rather than silently dropping someone's question.
+        console.error(`FAIL  reply to @${m.author}: ${res.error}`);
+        continue;
+      }
+      recordAutoReply({ castHash: m.hash, fid: m.authorFid!, intent: a.intent.kind, ref: res.ref });
+      handled++;
+      console.log(`SENT  reply to @${m.author}  [${a.intent.kind}]  ${res.ref ?? ''}`);
+      console.log(`      why: ${verdict.reason}`);
+      console.log(`      Q: ${m.text.slice(0, 120)}`);
+      console.log(`      A: ${a.text}\n`);
       continue;
     }
 
@@ -96,18 +137,28 @@ async function pass(): Promise<number> {
     );
     if (!post) continue;
 
-    queued++;
+    handled++;
     console.log(`QUEUE ${post.id}  reply to @${m.author}  [${a.intent.kind}]`);
+    console.log(`      queued because: ${verdict.reason}`);
     console.log(`      Q: ${m.text.slice(0, 120)}`);
     console.log(`      A: ${a.text}`);
     console.log(`      reproduce: ${a.reproduce}\n`);
   }
-  return queued;
+  return handled;
 }
+
+console.log(
+  `autonomy: ${autonomyConfig.mode}` +
+    (autonomyConfig.mode === 'pro'
+      ? ` (entitled FIDs answered directly; <=${autonomyConfig.perFidDaily}/fid/day, ` +
+        `<=${autonomyConfig.dailyCap}/day total)`
+      : ' (every reply goes to the approval queue)') +
+    (dryRun ? ' | DRY RUN, nothing will be sent' : ''),
+);
 
 const first = await pass();
 console.log(
-  `${first} repl${first === 1 ? 'y' : 'ies'} queued as drafts. Nothing is sent until approved:\n` +
+  `\n${first} mention(s) handled. Queued drafts are sent only after approval:\n` +
     '  npm run agent:queue\n  npm run agent:approve -- <id>\n  npm run agent:publish -- --live',
 );
 
@@ -115,7 +166,7 @@ if (flag('watch')) {
   console.log(`\nwatching for mentions every ${intervalMs / 1000}s -- ctrl-c to stop`);
   setInterval(() => {
     void pass().then((n) => {
-      if (n > 0) console.log(`${n} new repl${n === 1 ? 'y' : 'ies'} queued for approval`);
+      if (n > 0) console.log(`${n} new mention(s) handled`);
     });
   }, intervalMs);
 }

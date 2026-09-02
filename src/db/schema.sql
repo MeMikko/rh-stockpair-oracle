@@ -224,3 +224,19 @@ CREATE TABLE IF NOT EXISTS entitlements (
   PRIMARY KEY (subject_type, subject)
 );
 CREATE INDEX IF NOT EXISTS entitlements_tier ON entitlements(tier, expires_at);
+
+-- Autonomous replies actually sent, for rate limiting and for an audit trail.
+--
+-- Separate from `posts` on purpose: a post is something a person approved, and
+-- an autonomous reply is something nobody approved. Keeping them in one table
+-- would blur the only distinction that matters here. One row per cast replied
+-- to, so a restart cannot double-answer.
+CREATE TABLE IF NOT EXISTS auto_replies (
+  cast_hash  TEXT PRIMARY KEY,
+  fid        TEXT NOT NULL,
+  replied_at INTEGER NOT NULL,
+  intent     TEXT,
+  ref        TEXT              -- platform id of the reply we sent
+);
+CREATE INDEX IF NOT EXISTS auto_replies_fid_time ON auto_replies(fid, replied_at);
+CREATE INDEX IF NOT EXISTS auto_replies_time ON auto_replies(replied_at);

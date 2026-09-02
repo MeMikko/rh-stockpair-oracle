@@ -20,6 +20,12 @@ import { saveSignals, type Signal } from './signals.js';
 export interface Mention {
   hash: string;
   author: string;
+  /**
+   * The author's FID as reported by Neynar. This is the field entitlements
+   * hang on, and it is trustworthy precisely because Neynar asserted it rather
+   * than the caller -- unlike anything arriving in an HTTP request.
+   */
+  authorFid: string | null;
   text: string;
   timestamp: number;
 }
@@ -53,7 +59,12 @@ export async function fetchMentions(fid: string, limit = 25): Promise<Mention[]>
 
   const body = (await res.json()) as {
     notifications?: Array<{
-      cast?: { hash?: string; text?: string; timestamp?: string; author?: { username?: string } };
+      cast?: {
+      hash?: string;
+      text?: string;
+      timestamp?: string;
+      author?: { username?: string; fid?: number | string };
+    };
     }>;
   };
 
@@ -63,16 +74,22 @@ export async function fetchMentions(fid: string, limit = 25): Promise<Mention[]>
     .map((c) => ({
       hash: c.hash!,
       author: c.author?.username ?? 'unknown',
+      authorFid: c.author?.fid === undefined ? null : String(c.author.fid),
       text: c.text!,
       timestamp: c.timestamp ? Date.parse(c.timestamp) : Date.now(),
     }));
 }
 
-/** Mentions not already turned into a queued reply. */
+/**
+ * Mentions not already dealt with — queued for approval *or* answered
+ * autonomously. Both paths have to be consulted, or a restart would answer
+ * the same cast twice by two different routes.
+ */
 export function unanswered(mentions: Mention[]): Mention[] {
   const db = getDb();
-  const seen = db.prepare('SELECT 1 FROM posts WHERE reply_to = ? LIMIT 1');
-  return mentions.filter((m) => !seen.get(m.hash));
+  const queued = db.prepare('SELECT 1 FROM posts WHERE reply_to = ? LIMIT 1');
+  const auto = db.prepare('SELECT 1 FROM auto_replies WHERE cast_hash = ? LIMIT 1');
+  return mentions.filter((m) => !queued.get(m.hash) && !auto.get(m.hash));
 }
 
 /**
@@ -100,6 +117,7 @@ export async function signalForMention(m: Mention): Promise<{ signal: Signal; an
       facts: {
         ...a.facts,
         askedBy: m.author,
+        askedByFid: m.authorFid,
         castHash: m.hash,
         intent: a.intent.kind,
       },
