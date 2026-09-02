@@ -54,8 +54,11 @@ export function savePools(pools: PoolRow[]): { saved: number; stockPaired: numbe
      ON CONFLICT(pool_id) DO NOTHING`,
   );
 
+  if (pools.length === 0) return { saved: 0, stockPaired: 0 };
+
   let stockPaired = 0;
   db.exec('BEGIN');
+  try {
   for (const p of pools) {
     const derived = computePoolId({
       currency0: p.currency0,
@@ -76,7 +79,14 @@ export function savePools(pools: PoolRow[]): { saved: number; stockPaired: numbe
       p.initSqrtPx, p.initTick, c.stockSide, c.stockSymbol, c.pairedToken, c.quoteKind,
     );
   }
-  db.exec('COMMIT');
+    db.exec('COMMIT');
+  } catch (err) {
+    // A poolId mismatch is fatal on purpose -- a wrong PoolKey would produce
+    // confidently wrong quotes -- but it must not leave the walker holding an
+    // open transaction, or every later range fails for the wrong reason.
+    db.exec('ROLLBACK');
+    throw err;
+  }
   return { saved: pools.length, stockPaired };
 }
 

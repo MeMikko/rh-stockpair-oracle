@@ -123,3 +123,59 @@ CREATE TABLE IF NOT EXISTS posts (
   error        TEXT
 );
 CREATE INDEX IF NOT EXISTS posts_status ON posts(status);
+
+-- Uniswap v3 pools. Kept in their own table rather than merged into `pools`:
+-- a v3 pool is an address with its own Swap events, a v4 pool is a PoolId
+-- inside one singleton, and flattening the two would hide exactly the
+-- distinction a coverage claim depends on.
+CREATE TABLE IF NOT EXISTS pools_v3 (
+  address       TEXT PRIMARY KEY,        -- pool contract, lowercase
+  token0        TEXT NOT NULL,
+  token1        TEXT NOT NULL,
+  fee           INTEGER NOT NULL,
+  tick_spacing  INTEGER NOT NULL,
+  init_block    INTEGER NOT NULL,
+  init_tx       TEXT NOT NULL,
+  stock_side    INTEGER,
+  stock_symbol  TEXT,
+  paired_token  TEXT,
+  quote_kind    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pools_v3_stock ON pools_v3(stock_symbol) WHERE stock_symbol IS NOT NULL;
+CREATE INDEX IF NOT EXISTS pools_v3_kind  ON pools_v3(quote_kind);
+
+-- Rolling swap-volume accumulator. Individual swaps are not stored: the chain
+-- produces far more of them than a v1 cache should hold, and no endpoint
+-- answers a per-swap question. One row per pool per measured window, replaced
+-- on each run, so a volume claim always carries the window it was measured
+-- over rather than being an undated total.
+CREATE TABLE IF NOT EXISTS pool_volume (
+  pool_key     TEXT NOT NULL,            -- v4 PoolId or v3 pool address
+  protocol     TEXT NOT NULL,            -- v4 | v3
+  from_block   INTEGER NOT NULL,
+  to_block     INTEGER NOT NULL,
+  from_ts      INTEGER NOT NULL,
+  to_ts        INTEGER NOT NULL,
+  swaps        INTEGER NOT NULL,
+  abs_amount0  TEXT NOT NULL,            -- summed |amount0|, raw units
+  abs_amount1  TEXT NOT NULL,
+  updated_at   INTEGER NOT NULL,
+  PRIMARY KEY (pool_key, protocol)
+);
+CREATE INDEX IF NOT EXISTS pool_volume_swaps ON pool_volume(swaps DESC);
+
+-- Explorer-sourced token facts. Kept apart from token_meta on purpose:
+-- token_meta holds what the chain says (decimals, symbol) and feeds the
+-- pricing path, while this holds what an index says (holder counts, the
+-- explorer's own USD rate) and feeds nothing that /quote returns.
+CREATE TABLE IF NOT EXISTS token_explorer (
+  address       TEXT PRIMARY KEY,
+  symbol        TEXT,
+  name          TEXT,
+  decimals      INTEGER,
+  holders       INTEGER,
+  total_supply  TEXT,
+  exchange_rate REAL,
+  synced_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS token_explorer_holders ON token_explorer(holders DESC);

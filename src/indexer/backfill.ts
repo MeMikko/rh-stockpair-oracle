@@ -1,86 +1,123 @@
-import { getClient, env, isPublicRpc } from '../../config/chain.js';
-import { getCursor, setCursor } from '../db/index.js';
-import { fetchInitializeRange, savePools } from './initialize.js';
+import { getClient, env, isPublicRpc, rpcHost, GENESIS_BLOCK } from '../../config/chain.js';
+import { savePools } from './initialize.js';
+import { saveV3Pools } from './v3.js';
+import { initializeFetcher, v3PoolFetcher, type LogSource } from './sources.js';
+import { walkLogs, type Progress } from './logWalker.js';
+import { BLOCKSCOUT_LOG_CAP } from '../sources/blockscout.js';
 import { withRetry } from '../util/retry.js';
 
-const STREAM = 'v4:initialize';
-const MIN_CHUNK = 25n;
+export const V4_STREAM = 'v4:initialize';
+export const V3_STREAM = 'v3:poolcreated';
 
 export interface BackfillOpts {
-  /** Where to start when there is no stored cursor. */
+  /** Where to start when there is no stored cursor. Defaults to genesis. */
   fromBlock?: bigint;
-  /** Stop after this many successful ranges; useful for a bounded first run. */
-  maxChunks?: number;
-  onProgress?: (info: { from: bigint; to: bigint; pools: number; stockPaired: number; span: bigint }) => void;
+  /** Stop after this many committed ranges; useful for a bounded first run. */
+  maxRanges?: number;
+  /** Ignore any stored cursor and rewalk from fromBlock. */
+  resume?: boolean;
+  /** Which of the two discovery paths to read from. Default 'rpc'. */
+  source?: LogSource;
+  /** Cursor stream name override, so a cross-check walk cannot clobber the real cursor. */
+  stream?: string;
+  onProgress?: (info: Progress & { stockPaired: number }) => void;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export interface BackfillResult {
+  ranges: number;
+  pools: number;
+  stockPaired: number;
+  failures: number;
+  fromBlock: bigint;
+  toBlock: bigint;
+  complete: boolean;
+  source: LogSource;
+}
 
 /**
- * Resumable backfill of PoolManager Initialize events, with adaptive ranges.
- *
- * The public RPC not only caps eth_getLogs near 1000 blocks, it also times out
- * server-side ("context deadline exceeded") on ranges it nominally accepts. So
- * the span is treated as a moving target: halve it on failure down to
- * MIN_CHUNK, grow it back gently on success. The cursor is committed after each
- * successful range, so an interrupted run resumes without regap.
+ * Starting span for a source. The explorer caps a response at 1000 rows and
+ * times out on wide ranges at the CDN, so it starts an order of magnitude
+ * tighter than an RPC that caps on result count alone; the walker adapts from
+ * there in both directions.
  */
-export async function backfill(
-  opts: BackfillOpts = {},
-): Promise<{ chunks: number; pools: number; stockPaired: number; failures: number }> {
+function maxSpanFor(source: LogSource): bigint {
+  const configured = BigInt(env.logChunk);
+  if (source !== 'blockscout') return configured;
+  const cap = BigInt(BLOCKSCOUT_LOG_CAP) * 10n;
+  return configured < cap ? configured : cap;
+}
+
+function warnIfPublic(what: string): void {
+  if (!isPublicRpc()) return;
+  console.warn(
+    `[${what}] public RPC (${rpcHost()}): ranges cap near 1000 blocks and time out under load.\n` +
+    `           A genesis backfill needs a dedicated endpoint -- set ALCHEMY_API_KEY or RH_RPC_URL.`,
+  );
+}
+
+/**
+ * Backfill v4 pool discovery from PoolManager Initialize events.
+ *
+ * Defaults to genesis rather than a recent window: a coverage claim ("every
+ * stock-paired pool on the chain") is only true if the walk actually started
+ * at block 1. The adaptive walker keeps that affordable -- see logWalker.
+ */
+export async function backfill(opts: BackfillOpts = {}): Promise<BackfillResult> {
+  const source = opts.source ?? 'rpc';
+  if (source === 'rpc') warnIfPublic('backfill');
   const client = getClient();
   const tip = await withRetry(() => client.getBlockNumber(), { label: 'blockNumber' });
-  const maxChunk = BigInt(env.logChunk);
+  const from = opts.fromBlock ?? GENESIS_BLOCK;
 
-  const stored = getCursor(STREAM);
-  let cursor = stored !== null ? BigInt(stored) + 1n : (opts.fromBlock ?? tip - maxChunk);
-  let span = maxChunk;
+  let stockPaired = 0;
+  const res = await walkLogs({
+    stream: opts.stream ?? V4_STREAM,
+    fromBlock: from,
+    toBlock: tip,
+    maxSpan: maxSpanFor(source),
+    resume: opts.resume,
+    maxRanges: opts.maxRanges,
+    fetch: initializeFetcher(source),
+    save: (rows) => { stockPaired += savePools(rows).stockPaired; },
+    onProgress: (p) => opts.onProgress?.({ ...p, stockPaired }),
+  });
 
-  if (isPublicRpc()) {
-    console.warn(
-      '[backfill] public RPC: ranges are capped near 1000 blocks and time out under load.\n' +
-      '           Set RH_RPC_URL to a dedicated endpoint for any real backfill.',
-    );
-  }
+  return {
+    ranges: res.ranges, pools: res.rows, stockPaired, failures: res.failures,
+    fromBlock: from, toBlock: tip, complete: res.complete, source,
+  };
+}
 
-  let chunks = 0, pools = 0, stockPaired = 0, failures = 0, consecutiveOk = 0;
+/**
+ * Backfill v3 pool discovery from the factory's PoolCreated events.
+ *
+ * This exists to answer a question the v4 indexer cannot: how much
+ * stock-paired liquidity is on v3 and therefore invisible to /quote. Whether
+ * the answer is "none" or "a lot", it has to be measured before any claim of
+ * full coverage is made.
+ */
+export async function backfillV3(opts: BackfillOpts = {}): Promise<BackfillResult> {
+  const source = opts.source ?? 'rpc';
+  if (source === 'rpc') warnIfPublic('backfill:v3');
+  const client = getClient();
+  const tip = await withRetry(() => client.getBlockNumber(), { label: 'blockNumber' });
+  const from = opts.fromBlock ?? GENESIS_BLOCK;
 
-  while (cursor <= tip) {
-    if (opts.maxChunks !== undefined && chunks >= opts.maxChunks) break;
-    const to = cursor + span - 1n > tip ? tip : cursor + span - 1n;
+  let stockPaired = 0;
+  const res = await walkLogs({
+    stream: opts.stream ?? V3_STREAM,
+    fromBlock: from,
+    toBlock: tip,
+    maxSpan: maxSpanFor(source),
+    resume: opts.resume,
+    maxRanges: opts.maxRanges,
+    fetch: v3PoolFetcher(source),
+    save: (rows) => { stockPaired += saveV3Pools(rows).stockPaired; },
+    onProgress: (p) => opts.onProgress?.({ ...p, stockPaired }),
+  });
 
-    try {
-      const rows = await fetchInitializeRange(cursor, to);
-      const res = savePools(rows);
-      setCursor(STREAM, Number(to));
-
-      pools += res.saved;
-      stockPaired += res.stockPaired;
-      chunks++;
-      opts.onProgress?.({ from: cursor, to, pools: res.saved, stockPaired: res.stockPaired, span });
-      cursor = to + 1n;
-
-      // Grow back toward the cap after a run of clean responses.
-      if (++consecutiveOk >= 3 && span < maxChunk) {
-        span = span * 2n > maxChunk ? maxChunk : span * 2n;
-        consecutiveOk = 0;
-      }
-    } catch (err) {
-      failures++;
-      consecutiveOk = 0;
-      if (span > MIN_CHUNK) {
-        span = span / 2n < MIN_CHUNK ? MIN_CHUNK : span / 2n;
-        console.warn(`[backfill] range ${cursor}-${to} failed; retrying with span ${span}`);
-        await sleep(1_000);
-        continue;
-      }
-      // Already at the floor: back off harder before retrying the same range.
-      if (failures % 5 === 0) {
-        console.error(`[backfill] stuck at ${cursor} after ${failures} failures: ${(err as Error).message.slice(0, 120)}`);
-      }
-      await sleep(5_000);
-    }
-  }
-
-  return { chunks, pools, stockPaired, failures };
+  return {
+    ranges: res.ranges, pools: res.rows, stockPaired, failures: res.failures,
+    fromBlock: from, toBlock: tip, complete: res.complete, source,
+  };
 }

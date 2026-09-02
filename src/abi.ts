@@ -5,6 +5,41 @@ export const INITIALIZE_EVENT = parseAbiItem(
   'event Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)',
 );
 
+/**
+ * PoolManager Swap. Every v4 swap on the chain lands here regardless of hook,
+ * which is what makes chain-wide volume readable from one address.
+ * amount0/amount1 are signed from the *pool's* perspective.
+ */
+export const V4_SWAP_EVENT = parseAbiItem(
+  'event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)',
+);
+
+/** UniswapV3Factory pool discovery. v3 pools are separate contracts. */
+export const V3_POOL_CREATED_EVENT = parseAbiItem(
+  'event PoolCreated(address indexed token0, address indexed token1, uint24 indexed fee, int24 tickSpacing, address pool)',
+);
+
+/**
+ * v3 Swap is emitted by each pool contract, not by the factory, so a chain-wide
+ * v3 volume read filters by event topic across all addresses and resolves the
+ * pool from the log address.
+ */
+export const V3_SWAP_EVENT = parseAbiItem(
+  'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)',
+);
+
+export const V3_POOL_ABI = parseAbi([
+  'function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
+  'function liquidity() view returns (uint128)',
+  'function token0() view returns (address)',
+  'function token1() view returns (address)',
+  'function fee() view returns (uint24)',
+]);
+
+export const V3_FACTORY_ABI = parseAbi([
+  'function getPool(address tokenA, address tokenB, uint24 fee) view returns (address)',
+]);
+
 export const STATE_VIEW_ABI = parseAbi([
   'function getSlot0(bytes32 poolId) view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)',
   'function getLiquidity(bytes32 poolId) view returns (uint128 liquidity)',
