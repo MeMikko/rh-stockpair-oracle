@@ -92,9 +92,12 @@ describe('conversational fallback', () => {
   it('accepts a reply longer than a cast but within its own limit', async () => {
     const long =
       'I index tokenized stock pools on Robinhood Chain and answer questions about pool ' +
-      'counts, corporate actions, feed coverage and the split between Uniswap versions. ' +
-      'Ask about a ticker and I will tell you what the index holds for it right now.';
+      'counts, upcoming corporate actions, Chainlink feed coverage, gas, and the split ' +
+      'between the two Uniswap versions deployed here. Ask about a ticker and I will tell ' +
+      'you what the index holds for it, along with the call that reproduces the answer.';
+    // Comfortably past a cast's limit, comfortably inside this module's own.
     expect(long.length).toBeGreaterThan(280);
+    expect(long.length).toBeLessThan(480);
     vi.stubGlobal('fetch', async () => reply(long));
     const r = await conversationalAnswer('introduce yourself', FALLBACK);
     expect(r.usedModel).toBe(true);
