@@ -7,9 +7,13 @@ import { registerCorporateActions } from './routes/corporateActions.js';
 import { registerAsk } from './routes/ask.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { getDb } from '../db/index.js';
+import { registerMetering } from './metering.js';
 
 export function buildServer() {
   const app = Fastify({ logger: true });
+
+  // Before the routes, so every priced response carries its price.
+  registerMetering(app);
 
   app.get('/health', async () => {
     const db = getDb();

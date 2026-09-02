@@ -14,6 +14,22 @@ carries the facts behind it.
 **Base URL:** `https://REPLACE-ME.example.com`
 **Source:** `https://github.com/REPLACE-ME/rh-stockpair-oracle`
 
+**Pricing.** This is not a free service. It is currently in **launch mode**:
+every route is served without charge and no key is required, while each
+response publishes what the call will cost once billing is enabled.
+
+```
+x-oracle-price-usd: 0.01     what this route will cost
+x-oracle-charged-usd: 0      what it cost you today
+x-oracle-pricing: launch     the current mode
+```
+
+Read those headers rather than assuming. Intended prices are $0.005 for index
+reads (`/corporate-actions`, `/ask`) and $0.01 for anything that costs an
+upstream RPC round trip (`/quote`, `/prepare-swap`, `/gas`). `/health` and
+`/coverage` stay free. Prices are set to cover upstream cost, not to earn
+margin — adoption is the goal.
+
 ## Why this exists
 
 On Robinhood Chain, launchpads pair new tokens against tokenized equities
@@ -174,6 +190,8 @@ know. There is no fallback that guesses.
 - **`/prepare-swap` returns calldata, never a transaction.** Submit it through
   Bankr with `chainId: 4663` after your own validation. A 422 means the swap
   could not be bounded — do not construct calldata yourself to work around it.
+- **Do not hardcode a price.** Read `x-oracle-price-usd` and
+  `x-oracle-charged-usd` per response; launch mode will end.
 - **Do not compare these volume figures to another dashboard's.** Denominators
   differ; see the repository README for the measured breakdown and the
   unreconciled residual against Bankr's published number.

@@ -183,3 +183,20 @@ CREATE TABLE IF NOT EXISTS token_explorer (
   synced_at     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS token_explorer_holders ON token_explorer(holders DESC);
+
+-- Per-day, per-route, per-caller call counts.
+--
+-- Exists before billing does, because the price of a call should be set from
+-- its measured cost and measured demand rather than guessed. Callers are an
+-- API-key hash or a salted hash of the remote address -- never the address
+-- itself; this is a usage counter, not a visitor log.
+CREATE TABLE IF NOT EXISTS usage (
+  day     TEXT NOT NULL,          -- YYYY-MM-DD
+  route   TEXT NOT NULL,
+  caller  TEXT NOT NULL,
+  calls   INTEGER NOT NULL,
+  last_at INTEGER NOT NULL,
+  PRIMARY KEY (day, route, caller)
+);
+CREATE INDEX IF NOT EXISTS usage_day   ON usage(day);
+CREATE INDEX IF NOT EXISTS usage_route ON usage(route);

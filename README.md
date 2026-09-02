@@ -243,7 +243,46 @@ answer is skipped rather than answered with a shrug.
 - [ ] Cross-check discovery against Blockscout (blocked: free tier allows ~10
       requests/window and the supplied key is not honoured by this instance)
 - [x] Phase 4 — deployment (`ops/`, `docs/DEPLOY.md`) and skill package (`skill/`)
+- [x] Phase 4 — pricing published per response, usage accounting
 - [ ] Phase 4 — fill the two placeholders, deploy, open the skills-repo PR
+- [ ] Wire an actual payment path (x402 or key-based) and flip `PRICING_MODE=paid`
+
+## Pricing
+
+**This is not a free service, and it is not advertised as one.** It launches in
+`launch` mode: every route is served without charge and no key is required,
+while each response publishes what the call will cost once billing is enabled.
+
+```
+x-oracle-price-usd: 0.01     what this route will cost
+x-oracle-charged-usd: 0      what it cost the caller today
+x-oracle-pricing: launch     the current mode
+```
+
+Publishing the price from day one is the point. "Free" would be a promise that
+has to be broken later; a header a caller can read is a plan they can build
+against. `config/pricing.ts` holds the list, in three tiers that follow real
+upstream cost — index reads are local, chain reads cost an RPC round trip, and
+quoter simulations cost several:
+
+| Route | Price |
+|---|---|
+| `/health`, `/coverage` | free |
+| `/corporate-actions`, `/ask` | $0.005 |
+| `/gas`, `/quote`, `/prepare-swap` | $0.01 |
+
+Payment itself is deliberately not wired up yet — see the status list. What is
+wired up is the accounting: `usage` counts calls per day, route and caller, so
+the price can be set from measured demand rather than guessed.
+
+```bash
+npm run usage
+```
+
+Callers are identified by an API-key hash when one is presented, otherwise by
+a salted hash of the remote address. The raw address is never stored — this is
+a usage counter, not a visitor log — and the per-install salt means hashes are
+not comparable across deployments.
 
 ## Deploying
 

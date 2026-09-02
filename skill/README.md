@@ -3,7 +3,13 @@
 Pricing and corporate-action data for **Robinhood Chain (4663)** pools where
 one side is a tokenized stock or ETF.
 
-Free, read-only, no API key. Nothing here signs, broadcasts, or holds funds.
+Read-only. Nothing here signs, broadcasts, or holds funds.
+
+Currently in **launch mode** — served without charge and no key required —
+but this is not a free service. Every response publishes what the call will
+cost once billing is enabled (`x-oracle-price-usd`), what it cost you today
+(`x-oracle-charged-usd`), and the current mode (`x-oracle-pricing`). Read the
+headers rather than assuming.
 
 ```bash
 curl -s 'https://REPLACE-ME.example.com/quote?pool=0xPOOL_ID&size=1000'
