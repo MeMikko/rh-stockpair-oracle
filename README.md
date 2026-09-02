@@ -38,11 +38,12 @@ Trust `impact`, not `depth`.
 
 ## Two facts that shape the design
 
-**v3 is not a rounding error.** Over the 24h window measured 2026-09-02,
-Uniswap v3 carried **$151.6M of $409.5M** of stock-paired volume — 37%. The
-single most-traded stock-paired pool on the chain is a v3 NVDA/USDG pool
-(134,179 swaps, $42.6M). A v4-only index would have missed more than a third
-of the subject and still called itself complete.
+**v3 is not a rounding error.** Measured twice on 2026-09-02, on two machines
+over different windows: locally $151.6M of $409.5M (37%), and on the deployed
+server $160.5M of $447.3M (36%). Four of the five largest stock-paired pools
+by 24h volume are v3, and the most-traded of all by swap count is a v3
+NVDA/USDG pool. A v4-only index would have missed more than a third of the
+subject and still called itself complete.
 
 **Most stock tokens have no oracle.** 194 canonical stock tokens exist on chain
 4663; 35 have a Chainlink feed. For the other 159 a Chainlink deviation is not

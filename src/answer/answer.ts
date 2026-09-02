@@ -178,7 +178,10 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
           `Over the last ${r1(rep.hours)}h, stock-paired volume on Robinhood Chain was ` +
           `$${r1(total / 1e6)}M: $${r1(v4 / 1e6)}M on Uniswap v4 and $${r1(v3 / 1e6)}M on v3 ` +
           `(${Math.round((v3 / total) * 100)}%).`,
-        reproduce: 'npm run volume:sync',
+        // Reproducible by the caller, not by whoever runs the server. An
+        // answer that cites a command only the operator can run is not
+        // verifiable by the agent reading it.
+        reproduce: 'POST /ask {"question":"v3 v4 volume split"}',
       };
     }
 

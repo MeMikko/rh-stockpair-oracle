@@ -201,7 +201,7 @@ export async function detectProtocolSplit(): Promise<Signal[]> {
       fromBlock: rep.fromBlock,
       toBlock: rep.toBlock,
     },
-    reproduce: 'npm run volume:sync',
+    reproduce: 'POST /ask {"question":"v3 v4 volume split"}',
     detectedAt: Date.now(),
   }];
 }

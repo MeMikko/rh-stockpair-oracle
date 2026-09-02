@@ -45,14 +45,19 @@ Both Uniswap deployments, from each contract's creation block to the tip:
 
 | | v4 | v3 |
 |---|---|---|
-| Pools indexed | 570,744 | 425,837 |
-| Stock-paired | 44,443 | 1,782 |
-| Share of stock-paired volume | 63% | **37%** |
+| Pools indexed | 579,398 | 425,994 |
+| Stock-paired | 46,503 | 1,797 |
+| 24h volume | $286.8M | $160.5M |
+| Share | 64% | **36%** |
 
-The v3 half matters more than its pool count suggests. Three of the five
-largest stock-paired pools by 24h volume are v3, and the single most-traded by
-swap count is a v3 NVDA/USDG pool. **An index that covers only v4 misses a
-third of the subject**, which is what every other RH data source does today.
+The v3 half matters more than its pool count suggests. **Four of the five
+largest stock-paired pools by 24h volume are v3**, and the most-traded of all
+by swap count is a v3 NVDA/USDG pool (132,307 swaps). An index that covers
+only v4 misses more than a third of the subject — which is what every other RH
+data source does today.
+
+Live figures, not a snapshot: `POST /ask {"question":"v3 v4 volume split"}`
+returns the current measurement with the facts behind it.
 
 ## Endpoints
 
