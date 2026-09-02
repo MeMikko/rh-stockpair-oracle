@@ -174,12 +174,60 @@ swap, and bot traffic dominates the swap counts. Reserve checks say the volume
 itself is physically plausible — the top v3 NVDA pool holds ~$6.1M and turns
 over 7×/day — so the gap is most likely definitional, not arithmetic.
 
+## Answering, not just posting
+
+The agent has a conversational surface, and it obeys the same rule as the feed:
+**an answer may only contain numbers that appear in its own facts.** Answers run
+through `verifyDraft` exactly as posts do, because an answer is a published
+claim too -- it just happens to be addressed to someone.
+
+```bash
+curl -X POST localhost:8080/ask -H 'content-type: application/json'   -d '{"question":"how many pools quote NVDA?"}'
+```
+
+```json
+{ "answered": true, "intent": "pools", "symbol": "NVDA",
+  "answer": "9669 indexed pools on Robinhood Chain quote NVDA (9228 on Uniswap v4, 441 on v3).",
+  "facts": { "symbol": "NVDA", "v4Pools": 9228, "v3Pools": 441, "totalPools": 9669 },
+  "reproduce": "GET /corporate-actions?symbol=NVDA" }
+```
+
+`facts` and `reproduce` are the point: a caller can verify the answer rather
+than trust it. **No model runs in this path.** Intent detection is keyword
+matching over a closed set and the entity is matched against the indexed
+ticker universe, so the endpoint is deterministic and safe to call in a loop.
+
+A question it cannot classify returns `answered: false` and says what it does
+know. There is no fallback that guesses -- a confident wrong answer about what
+a stock is worth is far more damaging than no answer.
+
+Two collisions in that classifier were found by asking ordinary questions, and
+both are pinned by tests: "how many pools **quote** NVDA" uses *quote* as a
+verb rather than requesting one, and "the v3/v4 volume **split**" is not a
+stock split. Tickers match only as whole uppercase words, because `ON` and `PR`
+are real tickers here and case-insensitive matching turns most English into a
+lookup.
+
+### Replies go through the same approval queue
+
+```bash
+npm run agent:listen -- --question="does GME have a chainlink feed"   # offline
+npm run agent:listen                    # queue replies to real mentions
+npm run agent:listen -- --watch
+```
+
+A reply is a public claim from the account that publishes the feed, so it is
+queued as a draft and requires the same human approval and the same `--live`
+as a broadcast. The listener only ever writes drafts. A mention it cannot
+answer is skipped rather than answered with a shrug.
+
 ## Status
 
 - [x] Phase 1 — indexer + `/quote` + `/coverage`
 - [x] Phase 2 — `/prepare-swap` + `/gas`
 - [x] Phase 3 — corporate-action calendar + public agent with approval queue
 - [x] Genesis backfill, v3 indexing, volume measurement
+- [x] `POST /ask` + Farcaster reply queue
 - [ ] Reconcile the volume gap against Bankr's figure
 - [ ] Cross-check discovery against Blockscout (blocked: free tier allows ~10
       requests/window and the supplied key is not honoured by this instance)

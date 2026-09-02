@@ -28,7 +28,27 @@ export function getDb(): DatabaseSync {
   db = new DB(resolve(env.dbPath));
   db.exec('PRAGMA journal_mode = WAL');
   db.exec(readFileSync(resolve(here, 'schema.sql'), 'utf8'));
+  migrate(db);
   return db;
+}
+
+/**
+ * Additive migrations for databases created by an earlier schema.
+ *
+ * schema.sql is all CREATE TABLE IF NOT EXISTS, which silently does nothing
+ * when a table already exists -- so a new column never reaches an existing
+ * database and every read of it fails at runtime rather than at startup.
+ */
+function migrate(db: DatabaseSync): void {
+  const columns = (table: string): Set<string> =>
+    new Set(
+      (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<{ name: string }>)
+        .map((c) => c.name),
+    );
+
+  if (!columns('posts').has('reply_to')) {
+    db.exec('ALTER TABLE posts ADD COLUMN reply_to TEXT');
+  }
 }
 
 export function getCursor(stream: string): number | null {

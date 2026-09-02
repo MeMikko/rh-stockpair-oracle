@@ -120,7 +120,11 @@ CREATE TABLE IF NOT EXISTS posts (
   decided_by   TEXT,
   posted_at    INTEGER,
   post_refs    TEXT,
-  error        TEXT
+  error        TEXT,
+  -- Set when this post is a reply rather than a broadcast: the platform id of
+  -- the message being answered. A reply and a post are the same object here on
+  -- purpose -- both are public claims and both need the same approval.
+  reply_to     TEXT
 );
 CREATE INDEX IF NOT EXISTS posts_status ON posts(status);
 

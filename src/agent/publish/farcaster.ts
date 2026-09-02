@@ -8,7 +8,7 @@ export const farcaster: Publisher = {
     return Boolean(process.env.NEYNAR_API_KEY && process.env.NEYNAR_SIGNER_UUID);
   },
 
-  async publish(text: string, dryRun: boolean): Promise<PublishResult> {
+  async publish(text: string, dryRun: boolean, replyTo?: string | null): Promise<PublishResult> {
     if (dryRun || !this.configured()) {
       return { channel: 'farcaster', ref: null, dryRun: true };
     }
@@ -18,7 +18,13 @@ export const farcaster: Publisher = {
         'content-type': 'application/json',
         'x-api-key': process.env.NEYNAR_API_KEY!,
       },
-      body: JSON.stringify({ signer_uuid: process.env.NEYNAR_SIGNER_UUID, text }),
+      // `parent` turns the cast into a reply to that hash. Omitted entirely
+      // for a broadcast -- sending it as null makes Neynar reject the cast.
+      body: JSON.stringify({
+        signer_uuid: process.env.NEYNAR_SIGNER_UUID,
+        text,
+        ...(replyTo ? { parent: replyTo } : {}),
+      }),
     });
     if (!res.ok) {
       return { channel: 'farcaster', ref: null, dryRun: false,

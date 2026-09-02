@@ -24,7 +24,8 @@
     "index:backfill:v3": "node --env-file-if-exists=.env --import tsx scripts/backfill.ts --v3",
     "crosscheck": "node --env-file-if-exists=.env --import tsx scripts/crosscheck.ts",
     "volume:sync": "node --env-file-if-exists=.env --import tsx scripts/sync-volume.ts",
-    "holders:sync": "node --env-file-if-exists=.env --import tsx scripts/sync-holders.ts"
+    "holders:sync": "node --env-file-if-exists=.env --import tsx scripts/sync-holders.ts",
+    "agent:listen": "node --env-file-if-exists=.env --import tsx scripts/agent-listen.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",

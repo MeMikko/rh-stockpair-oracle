@@ -17,6 +17,8 @@ export interface QueuedPost {
   postedAt: number | null;
   postRefs: string | null;
   error: string | null;
+  /** Platform id of the message this answers, when it is a reply. */
+  replyTo: string | null;
 }
 
 const row2post = (r: Record<string, unknown>): QueuedPost => ({
@@ -28,10 +30,16 @@ const row2post = (r: Record<string, unknown>): QueuedPost => ({
   postedAt: r.posted_at ? Number(r.posted_at) : null,
   postRefs: r.post_refs ? String(r.post_refs) : null,
   error: r.error ? String(r.error) : null,
+  replyTo: r.reply_to ? String(r.reply_to) : null,
 });
 
 /** Queue a draft. One post per signal: re-scanning never duplicates. */
-export function enqueue(signalId: string, draft: Draft, channels: string[]): QueuedPost | null {
+export function enqueue(
+  signalId: string,
+  draft: Draft,
+  channels: string[],
+  replyTo?: string,
+): QueuedPost | null {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM posts WHERE signal_id = ?').get(signalId) as
     Record<string, unknown> | undefined;
@@ -39,9 +47,9 @@ export function enqueue(signalId: string, draft: Draft, channels: string[]): Que
 
   const id = randomUUID().slice(0, 8);
   db.prepare(
-    `INSERT INTO posts (id, signal_id, status, channels, draft_text, drafted_by, created_at)
-     VALUES (?, ?, 'draft', ?, ?, ?, ?)`,
-  ).run(id, signalId, channels.join(','), draft.text, draft.draftedBy, Date.now());
+    `INSERT INTO posts (id, signal_id, status, channels, draft_text, drafted_by, created_at, reply_to)
+     VALUES (?, ?, 'draft', ?, ?, ?, ?, ?)`,
+  ).run(id, signalId, channels.join(','), draft.text, draft.draftedBy, Date.now(), replyTo ?? null);
 
   return row2post(db.prepare('SELECT * FROM posts WHERE id = ?').get(id) as Record<string, unknown>);
 }

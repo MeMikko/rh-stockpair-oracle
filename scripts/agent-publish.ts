@@ -37,10 +37,11 @@ for (const post of approved) {
   for (const ch of post.channels) {
     const pub = publishers[ch as keyof typeof publishers];
     if (!pub) { results.push({ channel: ch, ref: null, dryRun: true, error: 'unknown channel' }); continue; }
-    results.push(await pub.publish(post.draftText, !live));
+    results.push(await pub.publish(post.draftText, !live, post.replyTo));
   }
 
-  console.log(`${post.id} [${live ? 'LIVE' : 'dry-run'}] -> ${post.channels.join(',')}`);
+  const kind = post.replyTo ? `reply to ${post.replyTo.slice(0, 12)}…` : 'broadcast';
+  console.log(`${post.id} [${live ? 'LIVE' : 'dry-run'}] ${kind} -> ${post.channels.join(',')}`);
   console.log(`   ${post.draftText}`);
   for (const r of results) {
     console.log(`   ${r.channel}: ${r.error ? 'ERROR ' + r.error : r.dryRun ? 'would post' : 'posted ' + r.ref}`);

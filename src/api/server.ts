@@ -4,6 +4,7 @@ import { registerQuote } from './routes/quote.js';
 import { registerGas } from './routes/gas.js';
 import { registerPrepareSwap } from './routes/prepareSwap.js';
 import { registerCorporateActions } from './routes/corporateActions.js';
+import { registerAsk } from './routes/ask.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { getDb } from '../db/index.js';
 
@@ -26,5 +27,6 @@ export function buildServer() {
   registerGas(app);
   registerPrepareSwap(app);
   registerCorporateActions(app);
+  registerAsk(app);
   return app;
 }

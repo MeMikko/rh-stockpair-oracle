@@ -10,7 +10,7 @@ export interface PublishResult {
 export interface Publisher {
   channel: string;
   configured(): boolean;
-  publish(text: string, dryRun: boolean): Promise<PublishResult>;
+  publish(text: string, dryRun: boolean, replyTo?: string | null): Promise<PublishResult>;
 }
 
 /**

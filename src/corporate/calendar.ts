@@ -90,8 +90,15 @@ export function upcomingActions(withinDays = 30, now = new Date()): ActionWithIm
     'SELECT * FROM corporate_actions WHERE process_date >= ? ORDER BY process_date ASC',
   ).all(today) as Record<string, unknown>[];
 
+  // Both protocols. A corporate action reprices every pool quoted in the
+  // stock regardless of which Uniswap version holds it, so counting v4 alone
+  // understates the impact -- and "reprices N pools" is the number these
+  // posts are built on.
   const countPools = db.prepare(
-    "SELECT COUNT(*) AS n FROM pools WHERE quote_kind = 'stock' AND stock_symbol = ?",
+    `SELECT (SELECT COUNT(*) FROM pools
+              WHERE quote_kind = 'stock' AND stock_symbol = ?1)
+          + (SELECT COUNT(*) FROM pools_v3
+              WHERE quote_kind = 'stock' AND stock_symbol = ?1) AS n`,
   );
 
   return rows.flatMap((r) => {
