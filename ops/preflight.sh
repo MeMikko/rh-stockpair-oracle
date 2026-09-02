@@ -39,7 +39,39 @@ else
 	ok "8080 is free"
 fi
 
-say "web server"
+say "who owns 80/443"
+# Checked before the systemd sweep below, because on a Docker host the proxy
+# is a container and systemctl knows nothing about it -- a survey that only
+# asked systemd would report "no web server" on a box actively serving one.
+if ss -ltnp 2>/dev/null | grep -qE ':(80|443) '; then
+	ss -ltnp 2>/dev/null | grep -E ':(80|443) ' | sed 's/^/  /'
+	if ss -ltnp 2>/dev/null | grep -E ':(80|443) ' | grep -qi 'docker\|proxy'; then
+		warn "ports 80/443 are held by Docker — the reverse proxy is a container."
+		echo "          Caddy cannot be installed alongside it; it would fail to bind."
+		echo "          Add a vhost to the existing container instead, proxying to"
+		echo "          the oracle on 127.0.0.1:\$PORT."
+	fi
+else
+	ok "80/443 are free"
+fi
+
+say "docker"
+if command -v docker >/dev/null 2>&1; then
+	warn "docker is installed — the other project probably runs in it"
+	docker ps --format '  {{.Names}}	{{.Image}}	{{.Ports}}' 2>/dev/null | head -20 		|| echo "          (cannot list containers as this user)"
+	if [ -n "$(docker ps -q --filter 'publish=80' 2>/dev/null)" ] || 	   [ -n "$(docker ps -q --filter 'publish=443' 2>/dev/null)" ]; then
+		echo "          A container publishes 80 and/or 443. That container is the"
+		echo "          reverse proxy; the oracle needs a vhost in ITS config, not a"
+		echo "          new Caddy on the host."
+	fi
+	for f in /root/docker-compose.yml /root/compose.yaml /opt/*/docker-compose.yml /srv/*/docker-compose.yml; do
+		[ -f "$f" ] && echo "          compose file: $f"
+	done
+else
+	ok "no docker"
+fi
+
+say "systemd web servers"
 for svc in caddy nginx apache2 httpd traefik; do
 	if systemctl is-active --quiet "$svc" 2>/dev/null; then
 		warn "$svc is running and is serving the existing site(s)"
@@ -62,6 +94,9 @@ for svc in caddy nginx apache2 httpd traefik; do
 		fi
 	fi
 done
+if ! systemctl is-active --quiet caddy nginx apache2 httpd traefik 2>/dev/null; then
+	echo "  (none running under systemd — see the Docker section above)"
+fi
 
 say "firewall"
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then
