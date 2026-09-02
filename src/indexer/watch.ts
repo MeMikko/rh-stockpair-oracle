@@ -1,4 +1,4 @@
-import { getClient, env } from '../../config/chain.js';
+import { getClient, getLogsClient, env } from '../../config/chain.js';
 import { getCursor, setCursor } from '../db/index.js';
 import { fetchInitializeRange, savePools } from './initialize.js';
 import { fetchV3PoolsRange, saveV3Pools } from './v3.js';
@@ -37,7 +37,12 @@ export async function watch(opts: { intervalMs?: number; confirmations?: number 
   const interval = opts.intervalMs ?? 5_000;
   let lastGasSample = 0;
   const confirmations = BigInt(opts.confirmations ?? 5);
-  const client = getClient();
+  // The tip comes from the same endpoint the logs do, not from the archive
+  // node. Two reasons, and the correctness one matters more than the cost:
+  // asking one node for the tip and another for logs can request a range the
+  // log node has not seen yet. It also happens to save ~17% of a month's
+  // Alchemy compute units on a poll that needs no archive at all.
+  const client = getLogsClient();
   const chunk = BigInt(env.logChunk);
 
   for (;;) {

@@ -282,6 +282,25 @@ sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
+## Upstream budget
+
+Alchemy serves state and archive reads; logs come from the public endpoint.
+Measured against a 30M compute-unit month:
+
+| | |
+|---|---|
+| Gas sampling, every 5 min from the tip follower | ~0.9M CU (3%) |
+| Left for request traffic | ~29M CU |
+| Which is roughly | 160,000 `/quote` calls, or 560,000 `/price` |
+
+The tip poll runs every 5 seconds and deliberately uses the *logs* endpoint,
+not Alchemy. Partly cost — it was 17% of the month for a call needing no
+archive — but mainly correctness: taking the tip from one node and logs from
+another can request a range the log node has not seen yet.
+
+Watch the headroom with Alchemy's own usage page rather than guessing. At the
+observed rate this is not the binding constraint; a popular `/quote` would be.
+
 ## What runs
 
 | Unit | Kind | Does |
