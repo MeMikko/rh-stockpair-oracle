@@ -5,6 +5,7 @@ import { registerGas } from './routes/gas.js';
 import { registerPrepareSwap } from './routes/prepareSwap.js';
 import { registerCorporateActions } from './routes/corporateActions.js';
 import { registerAsk } from './routes/ask.js';
+import { registerLanding } from './routes/landing.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { getDb } from '../db/index.js';
 import { registerMetering } from './metering.js';
@@ -55,5 +56,6 @@ export function buildServer() {
   registerPrepareSwap(app);
   registerCorporateActions(app);
   registerAsk(app);
+  registerLanding(app);
   return app;
 }
