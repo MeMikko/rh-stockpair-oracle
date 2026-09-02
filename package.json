@@ -29,7 +29,8 @@
     "sync:all": "node --env-file-if-exists=.env --import tsx scripts/sync-all.ts",
     "usage": "node --env-file-if-exists=.env --import tsx scripts/usage.ts",
     "ent": "node --env-file-if-exists=.env --import tsx scripts/entitlement.ts",
-    "neynar:check": "node --env-file-if-exists=.env --import tsx scripts/neynar-check.ts"
+    "neynar:check": "node --env-file-if-exists=.env --import tsx scripts/neynar-check.ts",
+    "secrets": "node --import tsx scripts/secrets.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",

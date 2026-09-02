@@ -73,13 +73,17 @@ export function repliesToday(): number {
 export function decide(opts: { fid: string | null; answered: boolean }): Decision {
   const cfg = autonomyConfig;
 
-  if (cfg.mode === 'off') {
-    return { autonomous: false, reason: 'autonomous replies are off (AGENT_AUTONOMOUS_REPLIES)' };
-  }
+  // Answerability first, because it is the more fundamental fact and the
+  // caller uses this reason in its logs. Checking the mode first meant an
+  // unanswerable question reported "autonomous replies are off", which is
+  // true, irrelevant, and sends anyone reading the log after the wrong thing.
   if (!opts.answered) {
     // Silence is the right answer to a question it cannot classify. Queueing
     // it for a person is also wrong -- there is nothing for them to approve.
     return { autonomous: false, reason: 'question not answerable; saying nothing' };
+  }
+  if (cfg.mode === 'off') {
+    return { autonomous: false, reason: 'autonomous replies are off (AGENT_AUTONOMOUS_REPLIES)' };
   }
   if (!opts.fid) {
     return { autonomous: false, reason: 'no FID on the mention' };

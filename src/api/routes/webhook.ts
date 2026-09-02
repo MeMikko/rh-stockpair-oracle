@@ -140,7 +140,13 @@ export function registerWebhook(app: FastifyInstance): void {
     const verdict = decide({ fid: mention.authorFid, answered });
 
     if (!answered) {
-      req.log.info(`mention from @${mention.author}: ${verdict.reason}`);
+      // The text is logged because this is the branch that needs diagnosing:
+      // an unanswerable mention is either genuinely off-topic or a classifier
+      // gap, and those are indistinguishable without seeing what was asked.
+      req.log.info(
+        { fid: mention.authorFid, text: mention.text.slice(0, 200) },
+        `mention from @${mention.author} not answerable; saying nothing`,
+      );
       return { ok: true, ignored: 'not answerable' };
     }
 
