@@ -27,6 +27,12 @@ export function getDb(): DatabaseSync {
   mkdirSync(dirname(resolve(env.dbPath)), { recursive: true });
   db = new DB(resolve(env.dbPath));
   db.exec('PRAGMA journal_mode = WAL');
+  // WAL allows many readers alongside one writer, but two writers still
+  // collide -- and SQLite's default busy timeout is zero, so the loser fails
+  // immediately with SQLITE_BUSY rather than waiting its turn. In deployment
+  // that is not rare: the tip follower writes continuously while the daily
+  // signal scan and the six-hourly sync also write. Wait instead of failing.
+  db.exec('PRAGMA busy_timeout = 15000');
   db.exec(readFileSync(resolve(here, 'schema.sql'), 'utf8'));
   migrate(db);
   return db;
