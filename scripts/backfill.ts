@@ -1,6 +1,6 @@
 import { backfill, backfillV3 } from '../src/indexer/backfill.js';
 import { parseSource } from '../src/indexer/sources.js';
-import { rpcHost, isPublicRpc } from '../config/chain.js';
+import { logsRpcHost } from '../config/chain.js';
 import { discoverStartBlock } from '../src/indexer/startBlock.js';
 
 /**
@@ -30,7 +30,7 @@ const from = fromArg ? BigInt(fromArg) : await discoverStartBlock(which);
 
 console.log(
   `${which} backfill | source=${source}` +
-    (source === 'rpc' ? ` (${rpcHost()}${isPublicRpc() ? ', PUBLIC' : ''})` : '') +
+    (source === 'rpc' ? ` (${logsRpcHost()})` : '') +
     ` | from block ${from}${fromArg ? '' : ' (contract creation)'}`,
 );
 

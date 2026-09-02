@@ -25,6 +25,8 @@ const arg = (n: string): string | undefined =>
   process.argv.find((a) => a.startsWith(`--${n}=`))?.split('=')[1];
 
 const hours = Number(arg('hours') ?? 24);
+/** Re-measure one protocol without redoing the other; both by default. */
+const only = arg('only');
 /** Bankr's own dashboard figure for daily volume on its tokens, for comparison. */
 const BANKR_DAILY_USD = 1_570_000;
 
@@ -46,16 +48,20 @@ const tick = (label: string) => (done: number, pools: number) => {
   console.log(`  ${label} ${(done * 100).toFixed(1)}% | ${pools} pools with swaps`);
 };
 
-const v4 = await measureV4Volume(win, tick('v4'));
-saveVolume('v4', win, v4);
-console.log(`  v4: ${v4.size} pools traded`);
+if (only !== 'v3') {
+  const v4 = await measureV4Volume(win, tick('v4'));
+  saveVolume('v4', win, v4);
+  console.log(`  v4: ${v4.size} pools traded`);
+}
 
-const v3Pools = (
-  getDb().prepare('SELECT address FROM pools_v3').all() as unknown as Array<{ address: string }>
-).map((r) => r.address);
-const v3 = await measureV3Volume(win, v3Pools, tick('v3'));
-saveVolume('v3', win, v3);
-console.log(`  v3: ${v3.size} of ${v3Pools.length} known pools traded`);
+if (only !== 'v4') {
+  const v3Pools = (
+    getDb().prepare('SELECT address FROM pools_v3').all() as unknown as Array<{ address: string }>
+  ).map((r) => r.address);
+  const v3 = await measureV3Volume(win, v3Pools, tick('v3'));
+  saveVolume('v3', win, v3);
+  console.log(`  v3: ${v3.size} of ${v3Pools.length} known pools traded`);
+}
 console.log(`  measured in ${((Date.now() - started) / 60_000).toFixed(1)}m\n`);
 
 const rep = await buildVolumeReport();

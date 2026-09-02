@@ -1,4 +1,4 @@
-import { getClient, env, isPublicRpc, rpcHost, GENESIS_BLOCK } from '../../config/chain.js';
+import { getClient, env, isPublicLogsRpc, logsRpcHost, GENESIS_BLOCK } from '../../config/chain.js';
 import { savePools } from './initialize.js';
 import { saveV3Pools } from './v3.js';
 import { initializeFetcher, v3PoolFetcher, type LogSource } from './sources.js';
@@ -47,11 +47,16 @@ function maxSpanFor(source: LogSource): bigint {
   return configured < cap ? configured : cap;
 }
 
-function warnIfPublic(what: string): void {
-  if (!isPublicRpc()) return;
-  console.warn(
-    `[${what}] public RPC (${rpcHost()}): ranges cap near 1000 blocks and time out under load.\n` +
-    `           A genesis backfill needs a dedicated endpoint -- set ALCHEMY_API_KEY or RH_RPC_URL.`,
+function noteEndpoint(what: string): void {
+  if (!isPublicLogsRpc()) return;
+  // Not a warning any more. Measured 2026-09-02: the public endpoint is the
+  // *better* of the two for logs. Alchemy's free tier caps eth_getLogs at a
+  // 10-block range, which turns a 52M-block walk into 5.2M requests; the
+  // public endpoint takes 1000-block ranges and sustains ~10 req/s across 8
+  // connections. It errors often under that load, which the walker absorbs by
+  // retrying, so failure counts below are expected rather than alarming.
+  console.log(
+    `[${what}] logs from ${logsRpcHost()} at ${env.logChunk} blocks x ${env.logConcurrency} parallel`,
   );
 }
 
@@ -64,7 +69,7 @@ function warnIfPublic(what: string): void {
  */
 export async function backfill(opts: BackfillOpts = {}): Promise<BackfillResult> {
   const source = opts.source ?? 'rpc';
-  if (source === 'rpc') warnIfPublic('backfill');
+  if (source === 'rpc') noteEndpoint('backfill');
   const client = getClient();
   const tip = await withRetry(() => client.getBlockNumber(), { label: 'blockNumber' });
   const from = opts.fromBlock ?? GENESIS_BLOCK;
@@ -75,6 +80,7 @@ export async function backfill(opts: BackfillOpts = {}): Promise<BackfillResult>
     fromBlock: from,
     toBlock: tip,
     maxSpan: maxSpanFor(source),
+    concurrency: source === 'blockscout' ? 1 : env.logConcurrency,
     resume: opts.resume,
     maxRanges: opts.maxRanges,
     fetch: initializeFetcher(source),
@@ -98,7 +104,7 @@ export async function backfill(opts: BackfillOpts = {}): Promise<BackfillResult>
  */
 export async function backfillV3(opts: BackfillOpts = {}): Promise<BackfillResult> {
   const source = opts.source ?? 'rpc';
-  if (source === 'rpc') warnIfPublic('backfill:v3');
+  if (source === 'rpc') noteEndpoint('backfill:v3');
   const client = getClient();
   const tip = await withRetry(() => client.getBlockNumber(), { label: 'blockNumber' });
   const from = opts.fromBlock ?? GENESIS_BLOCK;
@@ -109,6 +115,7 @@ export async function backfillV3(opts: BackfillOpts = {}): Promise<BackfillResul
     fromBlock: from,
     toBlock: tip,
     maxSpan: maxSpanFor(source),
+    concurrency: source === 'blockscout' ? 1 : env.logConcurrency,
     resume: opts.resume,
     maxRanges: opts.maxRanges,
     fetch: v3PoolFetcher(source),

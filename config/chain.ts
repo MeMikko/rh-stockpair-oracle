@@ -32,18 +32,38 @@ function resolveRpcUrl(): string {
 }
 
 const rpcUrl = resolveRpcUrl();
-const onPublic = rpcUrl.includes('rpc.mainnet.chain.robinhood.com');
+
+/**
+ * Endpoint for eth_getLogs, which is a different problem from state reads.
+ *
+ * Measured 2026-09-02, and it overturns what this project previously assumed:
+ *
+ *  - Alchemy's free tier caps eth_getLogs at a **10 block** range, which turns
+ *    a 52M-block walk into 5.2M requests. Not viable at any concurrency.
+ *  - The public RH endpoint does **not** cap the block range near 1000, as the
+ *    README long claimed. It caps the *result set* near 10,000 logs. A
+ *    200,000-block range comes back in ~1.3s with ~5,200 logs. The errors that
+ *    looked like a range limit are plain "Too Many Requests" under load.
+ *
+ * So logs come from the public endpoint by default, while state reads -- which
+ * need the archive access the public endpoint lacks -- stay on Alchemy.
+ */
+const logsRpcUrl = process.env.RH_LOGS_RPC_URL?.trim() || PUBLIC_RPC;
+const onPublic = logsRpcUrl.includes('rpc.mainnet.chain.robinhood.com');
 
 export const env = {
   rpcUrl,
   rpcFallbackUrl: process.env.RH_RPC_FALLBACK_URL ?? '',
   /**
-   * Starting eth_getLogs span. The public endpoint rejects anything over ~1000
-   * blocks outright. Dedicated endpoints cap on *result count* rather than
-   * range, so the backfill starts wide and lets the adaptive controller find
-   * the ceiling -- 52M blocks cannot be walked 1000 at a time.
+   * Starting eth_getLogs span. Both endpoints cap on result count rather than
+   * range, so the walk starts wide and the adaptive controller narrows it
+   * wherever the chain is dense. 200k keeps a dense range near 5k logs, half
+   * the observed ceiling, leaving headroom before truncation.
    */
-  logChunk: Number(process.env.RH_LOG_CHUNK ?? (onPublic ? 1_000 : 100_000)),
+  logsRpcUrl,
+  logChunk: Number(process.env.RH_LOG_CHUNK ?? 200_000),
+  /** Parallel in-flight ranges during a backfill. */
+  logConcurrency: Number(process.env.RH_LOG_CONCURRENCY ?? (onPublic ? 8 : 4)),
   dbPath: process.env.DB_PATH ?? './data/oracle.db',
   port: Number(process.env.PORT ?? 8080),
 };
@@ -53,7 +73,12 @@ export function rpcHost(): string {
   try { return new URL(env.rpcUrl).host; } catch { return 'invalid-url'; }
 }
 
+export function logsRpcHost(): string {
+  try { return new URL(env.logsRpcUrl).host; } catch { return 'invalid-url'; }
+}
+
 let client: PublicClient | undefined;
+let logsClient: PublicClient | undefined;
 
 export function getClient(): PublicClient {
   if (client) return client;
@@ -75,9 +100,31 @@ export function getClient(): PublicClient {
   return client;
 }
 
+/**
+ * Client for log queries. Separate from the state client because the two have
+ * opposite strengths here: the public endpoint indexes logs generously but
+ * keeps no archive state, and the Alchemy free tier is the reverse.
+ */
+export function getLogsClient(): PublicClient {
+  if (logsClient) return logsClient;
+  if (env.logsRpcUrl === env.rpcUrl) return getClient();
+  logsClient = createPublicClient({
+    chain: robinhoodChain,
+    transport: http(env.logsRpcUrl, {
+      timeout: 30_000, retryCount: 4, retryDelay: 1_000, batch: false,
+    }),
+  }) as PublicClient;
+  return logsClient;
+}
+
 /** True when the configured endpoint is the rate-limited public one. */
 export function isPublicRpc(): boolean {
   return env.rpcUrl.includes('rpc.mainnet.chain.robinhood.com');
+}
+
+/** True when logs come from the rate-limited public endpoint. */
+export function isPublicLogsRpc(): boolean {
+  return onPublic;
 }
 
 /** Chain genesis, measured: block 1 timestamp is 2026-04-30T16:52:11Z. */

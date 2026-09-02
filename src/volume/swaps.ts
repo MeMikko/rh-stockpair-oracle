@@ -1,5 +1,5 @@
 import type { Address, Hex } from 'viem';
-import { getClient, env } from '../../config/chain.js';
+import { getClient, getLogsClient, env } from '../../config/chain.js';
 import { V4 } from '../../config/addresses.js';
 import { V4_SWAP_EVENT, V3_SWAP_EVENT } from '../abi.js';
 import { getDb } from '../db/index.js';
@@ -35,6 +35,14 @@ export interface VolumeWindow {
 }
 
 const abs = (v: bigint): bigint => (v < 0n ? -v : v);
+
+/**
+ * Node-side result ceiling for eth_getLogs, measured on the public endpoint:
+ * a 1,000,000-block range came back with 9,454 logs and would not go higher.
+ * Kept slightly under 10,000 so a genuine near-cap response is re-fetched
+ * narrower rather than trusted.
+ */
+const RAW_RESULT_CAP = 9_500;
 
 /** Resolve a block window covering roughly the last `seconds` of chain time. */
 export async function recentWindow(seconds: number): Promise<VolumeWindow> {
@@ -82,7 +90,7 @@ export async function measureV4Volume(
     maxSpan: BigInt(env.logChunk),
     resume: false,
     fetch: async (from, to) => {
-      const logs = await getClient().getLogs({
+      const logs = await getLogsClient().getLogs({
         address: V4.poolManager as Address,
         event: V4_SWAP_EVENT,
         fromBlock: from,
@@ -136,12 +144,25 @@ export async function measureV3Volume(
     maxSpan: BigInt(env.logChunk),
     resume: false,
     fetch: async (from, to) => {
-      const logs = await getClient().getLogs({
+      const logs = await getLogsClient().getLogs({
         ...(useAddressFilter ? { address: poolAddresses as Address[] } : {}),
         event: V3_SWAP_EVENT,
         fromBlock: from,
         toBlock: to,
       });
+
+      // Truncation has to be judged on the RAW response, before filtering.
+      // The walker's own cap check sees only what this function returns, so
+      // when an unfiltered query is truncated at the node's 10k limit and
+      // few of those logs belong to known pools, a short list looks like a
+      // complete one and the missing swaps are lost silently -- understating
+      // volume with no error anywhere.
+      if (logs.length >= RAW_RESULT_CAP) {
+        throw new Error(
+          `v3 swaps: raw response hit the ${RAW_RESULT_CAP} result cap over ${from}-${to}; narrow the range`,
+        );
+      }
+
       return logs
         .filter((l) => known.has(l.address.toLowerCase()))
         .map((l) => ({

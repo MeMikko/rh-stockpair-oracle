@@ -1,5 +1,5 @@
 import type { Address, Hex } from 'viem';
-import { getClient } from '../../config/chain.js';
+import { getLogsClient } from '../../config/chain.js';
 import { V3 } from '../../config/addresses.js';
 import { V3_POOL_CREATED_EVENT } from '../abi.js';
 import { getDb } from '../db/index.js';
@@ -23,7 +23,7 @@ export interface V3PoolRow {
  * factory sees it.
  */
 export async function fetchV3PoolsRange(fromBlock: bigint, toBlock: bigint): Promise<V3PoolRow[]> {
-  const logs = await getClient().getLogs({
+  const logs = await getLogsClient().getLogs({
     address: V3.factory as Address,
     event: V3_POOL_CREATED_EVENT,
     fromBlock,

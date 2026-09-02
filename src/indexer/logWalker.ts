@@ -3,24 +3,36 @@ import { getCursor, setCursor } from '../db/index.js';
 /**
  * Adaptive eth_getLogs range walker, shared by every log-backed stream.
  *
- * Two different endpoints impose two different limits and the walker has to
- * satisfy both without being told which it is talking to:
+ * Every endpoint here imposes a different limit and the walker has to satisfy
+ * all of them without being told which one it is talking to. Measured
+ * 2026-09-02:
  *
- *  - the public RH endpoint rejects ranges over ~1000 blocks and also times
- *    out server-side on ranges it nominally accepts;
- *  - dedicated endpoints (Alchemy) accept an unbounded range but cap the
- *    *response* at 10,000 logs.
+ *  - the public RH endpoint has no block-range cap but truncates a response
+ *    near 10,000 logs, and returns "Too Many Requests" under load;
+ *  - Alchemy's free tier caps the *range* at 10 blocks, hard;
+ *  - Blockscout caps a response at 1000 rows and allows ~10 requests/window.
  *
- * So the span is a moving target in both directions: halve on failure down to
- * MIN_SPAN, grow back on clean responses, and additionally hold the span down
- * whenever a range comes back near the result cap. Growing back matters --
+ * So the span is a moving target in both directions: shrink on failure down to
+ * MIN_SPAN, grow back on clean responses, and hold it down whenever a range
+ * comes back near the result cap. Growing back is what makes the walk viable --
  * chain 4663 is past 52M blocks, and a fixed 1000-block span would need 52,000
- * round trips to walk it once.
+ * round trips where a 200,000-block span needs 262.
  */
 
 const MIN_SPAN = 25n;
 /** Treat a response at or above this as "the cap truncated me". */
 const RESULT_CAP = 9_500;
+
+/**
+ * Errors no amount of narrowing or waiting will fix inside one run. A rate
+ * limit measured in requests-per-window is not a range problem: shrinking the
+ * span makes it strictly worse by requiring more requests, and the walker's
+ * backoff just spends the next window's budget. Abort and say so.
+ */
+export function isFatalError(err: unknown): boolean {
+  const m = (err as Error)?.message?.toLowerCase() ?? '';
+  return m.includes('rate limited') || m.includes('requests per window');
+}
 
 /** Errors that mean "your range was too wide", not "the node is broken". */
 export function isRangeError(err: unknown): boolean {
@@ -55,6 +67,12 @@ export interface WalkOpts<T> {
   save: (rows: T[], from: bigint, to: bigint) => void;
   /** Resume from a stored cursor rather than fromBlock. Default true. */
   resume?: boolean;
+  /**
+   * Ranges fetched in parallel. The cursor still advances contiguously: a
+   * batch commits only its leading run of successes, so an interrupted walk
+   * never leaves a hole behind a committed cursor.
+   */
+  concurrency?: number;
   onProgress?: (info: Progress) => void;
   /** Stop after this many committed ranges. */
   maxRanges?: number;
@@ -90,65 +108,106 @@ export async function walkLogs<T>(opts: WalkOpts<T>): Promise<WalkResult> {
 
   const start = cursor;
   const total = toBlock >= start ? toBlock - start + 1n : 1n;
+  const concurrency = Math.max(1, opts.concurrency ?? 1);
   let span = maxSpan;
   let ranges = 0, rows = 0, failures = 0, consecutiveOk = 0;
+  /** Consecutive failures at the current position, for the give-up check. */
+  let stuck = 0;
+
+  type Outcome =
+    | { ok: true; from: bigint; to: bigint; got: T[] }
+    | { ok: false; from: bigint; to: bigint; err: unknown; capped: boolean };
 
   while (cursor <= toBlock) {
     if (opts.maxRanges !== undefined && ranges >= opts.maxRanges) break;
-    const to = cursor + span - 1n > toBlock ? toBlock : cursor + span - 1n;
 
-    try {
-      const got = await opts.fetch(cursor, to);
+    // Lay out a contiguous batch. Ordering matters more than parallelism
+    // here: results are committed strictly in order so the cursor is always
+    // a block below which everything has been seen.
+    const batch: Array<{ from: bigint; to: bigint }> = [];
+    let next = cursor;
+    for (let i = 0; i < concurrency && next <= toBlock; i++) {
+      const to = next + span - 1n > toBlock ? toBlock : next + span - 1n;
+      batch.push({ from: next, to });
+      next = to + 1n;
+      if (opts.maxRanges !== undefined && ranges + batch.length >= opts.maxRanges) break;
+    }
 
-      // A response at the cap is indistinguishable from a truncated one, so
-      // treat it as a range error rather than silently losing logs.
-      if (got.length >= RESULT_CAP && span > MIN_SPAN) {
-        span = span / 4n < MIN_SPAN ? MIN_SPAN : span / 4n;
-        consecutiveOk = 0;
-        continue;
-      }
+    const results: Outcome[] = await Promise.all(
+      batch.map(async ({ from, to }): Promise<Outcome> => {
+        try {
+          const got = await opts.fetch(from, to);
+          // A response at the cap is indistinguishable from a truncated one,
+          // so treat it as a range error rather than silently losing logs.
+          if (got.length >= RESULT_CAP) return { ok: false, from, to, err: null, capped: true };
+          return { ok: true, from, to, got };
+        } catch (err) {
+          return { ok: false, from, to, err, capped: false };
+        }
+      }),
+    );
 
-      opts.save(got, cursor, to);
-      setCursor(stream, Number(to));
-      rows += got.length;
+    // Commit the leading run of successes, then deal with the first failure.
+    let committed = 0;
+    for (const r of results) {
+      if (!r.ok) break;
+      opts.save(r.got, r.from, r.to);
+      setCursor(stream, Number(r.to));
+      rows += r.got.length;
       ranges++;
-      cursor = to + 1n;
+      committed++;
+      cursor = r.to + 1n;
       opts.onProgress?.({
-        from: cursor - span, to, rows: got.length, span,
-        done: Number(((to - start + 1n) * 1000n) / total) / 1000,
+        from: r.from, to: r.to, rows: r.got.length, span,
+        done: Number(((r.to - start + 1n) * 1000n) / total) / 1000,
         ranges, failures,
       });
+    }
 
-      // Grow back toward the cap, but only while responses stay small: a
-      // stream that is dense here is probably dense in the next range too.
-      if (++consecutiveOk >= 2 && span < maxSpan && got.length < RESULT_CAP / 4) {
+    const firstFailure = results[committed];
+    if (!firstFailure || firstFailure.ok) {
+      // Whole batch clean. Grow back toward the cap, but only while responses
+      // stay small: a stream dense here is probably dense in the next range.
+      stuck = 0;
+      const densest = Math.max(0, ...results.map((r) => (r.ok ? r.got.length : 0)));
+      if (++consecutiveOk >= 2 && span < maxSpan && densest < RESULT_CAP / 4) {
         span = span * 2n > maxSpan ? maxSpan : span * 2n;
         consecutiveOk = 0;
       }
-    } catch (err) {
-      failures++;
-      consecutiveOk = 0;
-      if (span > MIN_SPAN && isRangeError(err)) {
-        span = span / 4n < MIN_SPAN ? MIN_SPAN : span / 4n;
-        await sleep(300);
-        continue;
-      }
-      if (span > MIN_SPAN) {
-        span = span / 2n < MIN_SPAN ? MIN_SPAN : span / 2n;
-        await sleep(1_000);
-        continue;
-      }
-      if (failures % 5 === 0) {
-        console.error(
-          `[${stream}] stuck at ${cursor} after ${failures} failures: ` +
-            `${(err as Error).message.slice(0, 140)}`,
-        );
-      }
-      if (failures > 200) {
-        return { ranges, rows, failures, cursor: cursor - 1n, complete: false };
-      }
-      await sleep(5_000);
+      continue;
     }
+
+    failures++;
+    stuck = committed > 0 ? 0 : stuck + 1;
+    consecutiveOk = 0;
+
+    if (isFatalError(firstFailure.err)) {
+      console.error(
+        `[${stream}] aborting at ${cursor}: ${(firstFailure.err as Error).message.slice(0, 160)}`,
+      );
+      return { ranges, rows, failures, cursor: cursor - 1n, complete: false };
+    }
+
+    if (span > MIN_SPAN && (firstFailure.capped || isRangeError(firstFailure.err))) {
+      span = span / 4n < MIN_SPAN ? MIN_SPAN : span / 4n;
+      await sleep(300);
+      continue;
+    }
+    if (span > MIN_SPAN) {
+      span = span / 2n < MIN_SPAN ? MIN_SPAN : span / 2n;
+      await sleep(1_000);
+      continue;
+    }
+    if (stuck % 5 === 0) {
+      console.error(
+        `[${stream}] stuck at ${cursor} after ${stuck} failed attempts: ` +
+          `${(firstFailure.err as Error)?.message?.slice(0, 140) ?? 'result cap at minimum span'}`,
+      );
+    }
+    if (stuck > 200) {
+      return { ranges, rows, failures, cursor: cursor - 1n, complete: false };
+    }
+    await sleep(5_000);
   }
 
   return { ranges, rows, failures, cursor: cursor - 1n, complete: cursor > toBlock };

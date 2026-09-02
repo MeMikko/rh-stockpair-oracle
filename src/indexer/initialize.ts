@@ -1,5 +1,5 @@
 import type { Address, Hex } from 'viem';
-import { getClient, env } from '../../config/chain.js';
+import { getLogsClient, env } from '../../config/chain.js';
 import { V4 } from '../../config/addresses.js';
 import { INITIALIZE_EVENT } from '../abi.js';
 import { getDb } from '../db/index.js';
@@ -22,7 +22,7 @@ export interface PoolRow {
 
 /** Read Initialize events for a single block range. Caller owns chunking. */
 export async function fetchInitializeRange(fromBlock: bigint, toBlock: bigint): Promise<PoolRow[]> {
-  const logs = await getClient().getLogs({
+  const logs = await getLogsClient().getLogs({
     address: V4.poolManager as Address,
     event: INITIALIZE_EVENT,
     fromBlock,

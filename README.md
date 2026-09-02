@@ -38,6 +38,12 @@ Trust `impact`, not `depth`.
 
 ## Two facts that shape the design
 
+**v3 is not a rounding error.** Over the 24h window measured 2026-09-02,
+Uniswap v3 carried **$151.6M of $409.5M** of stock-paired volume — 37%. The
+single most-traded stock-paired pool on the chain is a v3 NVDA/USDG pool
+(134,179 swaps, $42.6M). A v4-only index would have missed more than a third
+of the subject and still called itself complete.
+
 **Most stock tokens have no oracle.** 194 canonical stock tokens exist on chain
 4663; 35 have a Chainlink feed. For the other 159 a Chainlink deviation is not
 merely absent, it is *unknowable* — so `/quote` returns
@@ -56,9 +62,16 @@ npm install
 cp .env.example .env      # add an Alchemy key -- see the RPC note below
 npm run verify:addresses  # asserts every configured address still has bytecode
 npm run registry:sync     # 194 stock tokens + 35 Chainlink feeds
-npm run index:backfill    # PoolManager Initialize events -> pools
+npm run index:backfill    # v4 pools, from PoolManager's creation block
+npm run index:backfill:v3 # v3 pools, from the factory's creation block
+npm run volume:sync       # 24h swap volume for stock-paired pools
+npm run crosscheck        # diff RPC vs explorer pool discovery
 npm run serve
 ```
+
+`.env` is loaded by every script via `--env-file-if-exists`. It did not used
+to be: nothing in the project read it, so configuration was silently ignored
+and every run used the public endpoint regardless of what the file said.
 
 ```bash
 curl 'localhost:8080/quote?pool=<v4PoolId>&size=1000'
@@ -67,15 +80,42 @@ curl 'localhost:8080/coverage'
 
 ### The RPC note
 
-The public endpoint (`rpc.mainnet.chain.robinhood.com`) caps `eth_getLogs`
-near 1000 blocks, times out server-side on ranges it nominally accepts, and
-rate-limits to 429 under sustained load. The backfill copes — it halves its
-span on failure down to 25 blocks and grows back on success — but the chain tip
-is past block 52,000,000 and a real backfill on the public endpoint is not
-practical. Set `RH_RPC_URL` to a dedicated endpoint; Alchemy is Robinhood's
-recommended provider.
+An earlier version of this file said the public endpoint caps `eth_getLogs`
+near 1000 blocks. **That was wrong**, and it was expensive: it is why the
+indexer shipped with a `tip - 1000` default and 77 pools that were presented
+as the pool set.
+
+Measured 2026-09-02:
+
+| Endpoint | `eth_getLogs` limit | Genesis walk |
+|---|---|---|
+| `rpc.mainnet.chain.robinhood.com` | ~10,000 **results**, no range cap | **4.4 min** (v4), 12.4 min (v3) |
+| Alchemy free tier | **10 blocks**, hard | 5.2M requests — not viable |
+| Blockscout v1 API | 1000 results, `page` ignored | viable but rate-limited |
+
+The public endpoint returns a 200,000-block range in ~1.3s. What looked like a
+range cap was plain `Too Many Requests` under load. So logs come from the
+public endpoint (`RH_LOGS_RPC_URL`), while state reads stay on Alchemy —
+the public endpoint keeps no archive state, so `eth_getCode` at a historical
+block fails with `metadata is not found` and contract creation blocks are
+unknowable there.
+
+The walker adapts the span in both directions and commits its cursor after
+every range, so an interrupted backfill resumes without a gap.
 
 ## Design notes
+
+**Two protocols, two tables.** Uniswap v3 is live on this chain and is
+indexed separately from its factory's `PoolCreated` events. A v3 pool is a
+contract address with its own `Swap` events; a v4 pool is a PoolId inside one
+singleton. Flattening them would hide exactly the distinction a coverage claim
+depends on, so `pools` and `pools_v3` stay apart.
+
+**Two discovery sources.** Pool discovery runs over the RPC *and* over
+Blockscout, and `npm run crosscheck` diffs the two rather than assuming they
+agree. The explorer also supplies what no RPC call returns: contract creation
+blocks and holder counts. It is never a pricing input — anything reaching
+`/quote` or `/prepare-swap` is read from the chain.
 
 **Hook-agnostic indexing.** Pools are discovered from `PoolManager.Initialize`
 alone, never per-launchpad. Bankr (via Doppler), Uniswap's own launchpad, PAIR,
@@ -102,11 +142,47 @@ surfaced in the response so a consumer can check that assumption.
 from the PoolKey and asserted against the event. A mismatch throws, because a
 wrong PoolKey would produce confidently wrong quotes.
 
+## Coverage, as measured
+
+Genesis backfill, 2026-09-02. Both walks start at the deploying contract's
+creation block and run to the tip.
+
+| | v4 | v3 |
+|---|---|---|
+| Pools indexed | 570,744 | 425,837 |
+| Stock-paired | 44,443 | 1,782 |
+| Walk time | 4.4 min | 12.4 min |
+| From block | 9,070 | 8,930 |
+
+24h stock-paired swap volume over blocks 51,543,684–52,401,168 (24.06h):
+
+| Segment | USD | Pools | Swaps |
+|---|---|---|---|
+| stock/USDG or WETH (equity venue pairs) | $180.8M | 1,064 | 1.52M |
+| stock/other token (launchpad-style) | $204.0M | 4,589 | 2.39M |
+| stock/stock | $24.7M | 45 | 81k |
+| **priced total** | **$409.5M** | 2,756 | — |
+| unpriceable (stock has no feed) | — | 2,942 | 1.76M |
+
+**This does not reconcile with Bankr's published $1.57M/day and must not be
+cited until it does.** Narrowed to the Bankr Doppler hook — the closest thing
+to Bankr's own denominator — we measure $87.1M/24h across 2,062 pools, still
+55× the published figure. Candidate explanations, none yet confirmed: the
+$1.57M figure dates from 2026-07-20 and the chain has grown since; Bankr may
+count a subset of its tokens, or exclude arbitrage; our figure counts every
+swap, and bot traffic dominates the swap counts. Reserve checks say the volume
+itself is physically plausible — the top v3 NVDA pool holds ~$6.1M and turns
+over 7×/day — so the gap is most likely definitional, not arithmetic.
+
 ## Status
 
 - [x] Phase 1 — indexer + `/quote` + `/coverage`
 - [x] Phase 2 — `/prepare-swap` + `/gas`
 - [x] Phase 3 — corporate-action calendar + public agent with approval queue
+- [x] Genesis backfill, v3 indexing, volume measurement
+- [ ] Reconcile the volume gap against Bankr's figure
+- [ ] Cross-check discovery against Blockscout (blocked: free tier allows ~10
+      requests/window and the supplied key is not honoured by this instance)
 - [ ] Phase 4 — x402 Cloud deploy, skills-repo PR
 
 Never sends transactions and never holds funds.

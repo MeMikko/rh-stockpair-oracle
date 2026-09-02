@@ -1,4 +1,4 @@
-import { getClient, env, rpcHost } from '../config/chain.js';
+import { getClient, env, logsRpcHost } from '../config/chain.js';
 import { bsEnv, BLOCKSCOUT_LOG_CAP } from '../src/sources/blockscout.js';
 import { initializeFetcher, v3PoolFetcher } from '../src/indexer/sources.js';
 import { walkLogs } from '../src/indexer/logWalker.js';
@@ -30,7 +30,7 @@ const from = arg('from')
 
 console.log(
   `crosscheck ${which} | blocks ${from}-${to} (${to - from + 1n})\n` +
-    `  rpc        ${rpcHost()}\n` +
+    `  rpc        ${logsRpcHost()}\n` +
     `  blockscout ${bsEnv.baseUrl}${bsEnv.apiKey ? ' (keyed)' : ' (no key)'}\n`,
 );
 

@@ -85,7 +85,17 @@ async function get(path: string, params: Record<string, string | number>): Promi
     }
 
     if (res.status === 429) {
-      interval = Math.min(interval * 2, 5_000);
+      // Back off hard and give up quickly. The free tier allows ~10 requests
+      // per short window, so a long retry loop does not wait out the limit --
+      // it spends the next window's budget and keeps the caller throttled.
+      // Failing fast lets the walker surface the limit instead of hiding it.
+      interval = Math.min(interval * 2, 10_000);
+      if (attempt >= 1) {
+        throw new Error(
+          `blockscout: rate limited (429) after ${attempt + 1} attempts; ` +
+            `free tier allows ~10 requests per window. Raise limits or slow the caller.`,
+        );
+      }
       await new Promise((r) => setTimeout(r, interval));
       continue;
     }
