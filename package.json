@@ -30,7 +30,8 @@
     "usage": "node --env-file-if-exists=.env --import tsx scripts/usage.ts",
     "ent": "node --env-file-if-exists=.env --import tsx scripts/entitlement.ts",
     "neynar:check": "node --env-file-if-exists=.env --import tsx scripts/neynar-check.ts",
-    "secrets": "node --import tsx scripts/secrets.ts"
+    "secrets": "node --import tsx scripts/secrets.ts",
+    "diagnose": "node --env-file-if-exists=.env --import tsx scripts/diagnose-mention.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",
