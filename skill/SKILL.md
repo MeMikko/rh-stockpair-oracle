@@ -56,16 +56,22 @@ by swap count is a v3 NVDA/USDG pool (132,307 swaps). An index that covers
 only v4 misses more than a third of the subject — which is what every other RH
 data source does today.
 
-Live figures, not a snapshot: `POST /ask {"question":"v3 v4 volume split"}`
-returns the current measurement with the facts behind it.
+Live figures, not a snapshot: `GET /volume` returns the current measurement
+with the window it was taken over, including `measuredSecondsAgo` — volume is
+a rolling 24h figure refreshed every 6h, so read that rather than deriving an
+age from a block number.
 
 ## Endpoints
 
 All reads. Nothing here signs, broadcasts, or holds funds.
 
 ```
-GET  /health                     index freshness: pool counts and cursors, both protocols
+GET  /.well-known/agent.json     START HERE: endpoints, auth, payment, limits
+GET  /health                     index freshness: cursors with lag in seconds
 GET  /coverage                   which stock tokens have a Chainlink feed
+GET  /price?symbol=TSLA          a stock's own USD price from its Chainlink feed
+GET  /pools?symbol=NVDA          pool counts for a stock, split by protocol
+GET  /volume                     24h stock-paired volume, and its measurement window
 GET  /quote?pool=<id>&size=<usd> implied USD, depth, price impact, deviation, market hours
 POST /prepare-swap               unsigned UniversalRouter calldata with a bounded min-out
 GET  /gas                        chain 4663 gas, split into L2 and L1-data components
@@ -104,7 +110,10 @@ on-chain. And deviation is only computable when the other side has its own USD
 reference — a memecoin/NVDA pool tells you about the memecoin, not about NVDA.
 
 So `/quote` returns `deviation: null` with a `deviationReason` rather than
-inventing a number. `GET /coverage` publishes the split. Any consumer that
+inventing a number. `GET /coverage` publishes the split, and
+`GET /price?symbol=` returns the stock's own oracle price where one exists —
+or 404 with the reason where none does, rather than substituting a pool's
+implied price, which is a price for the *other* token in that pool. Any consumer that
 treats a missing deviation as zero is wrong.
 
 ### `POST /prepare-swap`
@@ -171,11 +180,12 @@ curl -X POST https://oracle.sb4s.xyz/ask \
 { "answered": true, "intent": "pools", "symbol": "NVDA",
   "answer": "9669 indexed pools on Robinhood Chain quote NVDA (9228 on Uniswap v4, 441 on v3).",
   "facts": { "symbol": "NVDA", "v4Pools": 9228, "v3Pools": 441, "totalPools": 9669 },
-  "reproduce": "GET /corporate-actions?symbol=NVDA" }
+  "reproduce": "GET /pools?symbol=NVDA" }
 ```
 
 `facts` and `reproduce` are the point: **verify the answer rather than trust
-it.** No model runs in this path — intent is keyword matching over a closed
+it.** Every `reproduce` names a *different* route that returns the same figure
+independently — never the call you just made. No model runs in this path — intent is keyword matching over a closed
 set — so it is deterministic and safe to call in a loop.
 
 A question it cannot classify returns `answered: false` and says what it does

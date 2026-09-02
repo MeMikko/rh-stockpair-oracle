@@ -16,6 +16,8 @@
     "NOT a free service: launch mode serves without charge; every response carries x-oracle-price-usd, x-oracle-charged-usd and x-oracle-pricing. Read them, do not hardcode a price",
     "Chain: Robinhood (4663) — abort if the Bankr wallet does not support 4663",
     "Covers Uniswap v4 AND v3: v3 carries ~37% of stock-paired volume, 3 of the top 5 pools",
+    "GET /price?symbol=TSLA — the stock's own Chainlink price; 404 with a reason where no feed exists",
+    "GET /pools?symbol=NVDA — pool counts split by protocol. GET /volume — 24h volume with measuredSecondsAgo",
     "GET /quote?pool=&size= — implied USD, depth, price impact, Chainlink deviation, market hours",
     "deviation: null is normal — 159 of 194 stock tokens have no feed. Read deviationReason; never treat null as zero",
     "depth is an active-tick ESTIMATE and can mislead. Trust impact, which is a quoter simulation",
