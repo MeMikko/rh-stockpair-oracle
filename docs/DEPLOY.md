@@ -138,9 +138,18 @@ cd /opt/rh-oracle
 bash ops/preflight.sh
 ```
 
-Updates are then `git -C /opt/rh-oracle pull` followed by a service restart.
-Note that `.env` and `data/` are gitignored, so a pull can never overwrite the
-credentials or the index.
+Ownership matters from here on. Once the tree belongs to `oracle`, run git as
+that user:
+
+```bash
+sudo -u oracle git -C /opt/rh-oracle pull
+sudo systemctl restart rh-oracle-api rh-oracle-watch
+```
+
+Pulling as root works only after silencing git's `dubious ownership` check, and
+then leaves root-owned files in a tree the `oracle` user has to write to — the
+next `sudo -u oracle npm ci` fails on them. `.env` and `data/` are gitignored,
+so a pull can never overwrite the credentials or the index.
 
 The alternative pushes from a workstation that has SSH access:
 
