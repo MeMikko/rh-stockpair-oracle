@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { getDb } from '../../db/index.js';
 import { ROUTE_PRICES, pricingMode } from '../../../config/pricing.js';
 import { formatUsdc, paymentConfig, priceUnits, PAYMENT_CHAIN_ID } from '../../../config/payments.js';
+import { authConfigured } from '../../auth/session.js';
 
 /**
  * The page a human gets at the root.
@@ -339,6 +340,7 @@ Counts on this page are read live from the index at request time.
   var AMOUNT = ${JSON.stringify(priceUnits().toString())};
   var CHAIN_HEX = ${JSON.stringify('0x' + PAYMENT_CHAIN_ID.toString(16))};
 
+  var SIGNIN_READY = ${authConfigured() ? 'true' : 'false'};
   var account = null;
   var $ = function (id) { return document.getElementById(id); };
   var proout = $('proout');
@@ -352,9 +354,20 @@ Counts on this page are read live from the index at request time.
       var bits = [];
       if (account) bits.push('wallet <b>' + esc(account.slice(0, 6) + '…' + account.slice(-4)) + '</b>');
       bits.push(me.signedIn ? 'signed in as <b>' + esc(me.tier) + '</b>' : 'not signed in');
+      // A disabled button with no explanation reads as a missing feature.
+      // Say which step is next, or why the step cannot be taken at all.
+      if (!SIGNIN_READY) {
+        bits.push('sign-in is not configured on this server');
+      } else if (!account) {
+        bits.push('connect a wallet to pay or sign in');
+      }
       $('who').innerHTML = bits.join(' · ');
       $('pay').disabled = !account;
-      $('signin').disabled = !account;
+      $('signin').disabled = !account || !SIGNIN_READY;
+      $('signin').title = !SIGNIN_READY
+        ? 'The server has no AUTH_SECRET set, so sign-in is disabled.'
+        : (!account ? 'Connect a wallet first.' : 'Sign a message to prove this address.');
+      $('pay').title = account ? '' : 'Connect a wallet first.';
     }).catch(function () {});
   }
 
