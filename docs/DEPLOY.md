@@ -89,6 +89,21 @@ Both backfills commit their cursor after every range, so an interrupted run
 resumes where it stopped — just run it again. Run them under `tmux` or
 `systemd-run --scope` so an SSH drop does not kill them.
 
+### If there is no domain yet
+
+Caddy needs a DNS name to get a certificate; a bare IP cannot have one. To
+bring the stack up before a domain exists, use an `sslip.io` hostname — it
+resolves to the IP encoded in it and Let's Encrypt will issue for it:
+
+```
+203-0-113-10.sslip.io {     # your server's IP, dots replaced by dashes
+```
+
+Good enough to test the whole path over real TLS. **Not** good enough to
+publish: the hostname contains the IP, so the URL breaks if the box moves, and
+the skill catalogue would have to be corrected by another PR. Buy a name before
+submitting the skill.
+
 Point `ops/Caddyfile` at your hostname, then:
 
 ```bash

@@ -5,6 +5,16 @@
 # file), which is what keeps port 8080 off the internet.
 #
 # Replace the hostname before deploying.
+#
+# No domain yet? Use an sslip.io name, which resolves to the IP encoded in it
+# and which Let's Encrypt will issue a certificate for:
+#
+#   203-0-113-10.sslip.io {
+#
+# That is fine for bringing the stack up and testing it end to end. It is NOT
+# fine for the published skill: the hostname contains the IP, so the URL breaks
+# if the box ever moves -- and fixing it means another PR to the skills repo.
+# Get a real name before submitting anything that names this host.
 
 oracle.example.com {
 	encode zstd gzip
