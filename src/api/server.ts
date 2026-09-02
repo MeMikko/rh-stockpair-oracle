@@ -9,6 +9,7 @@ import { registerLanding } from './routes/landing.js';
 import { registerWebhook } from './routes/webhook.js';
 import { registerAuth } from './routes/auth.js';
 import { registerPro } from './routes/pro.js';
+import { registerX402 } from './x402.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { getDb } from '../db/index.js';
 import { registerMetering } from './metering.js';
@@ -18,6 +19,9 @@ export function buildServer() {
 
   // Before the routes, so every priced response carries its price.
   registerMetering(app);
+  // Before the routes: a gated call must be paid for or refused with a 402
+  // before any work is done on it.
+  registerX402(app);
 
   app.get('/health', async () => {
     const db = getDb();

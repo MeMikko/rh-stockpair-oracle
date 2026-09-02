@@ -282,3 +282,15 @@ CREATE TABLE IF NOT EXISTS fid_links (
   linked_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS fid_links_address ON fid_links(address);
+
+-- Prepaid x402 credit, in USDC base units.
+--
+-- A USDC transfer costs more in gas and latency than a $0.005 call is worth,
+-- so a transfer buys a balance that many calls draw down rather than settling
+-- one call at a time. Balances are strings because they are token base units
+-- and must not round.
+CREATE TABLE IF NOT EXISTS x402_credits (
+  payer      TEXT PRIMARY KEY,
+  balance    TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);

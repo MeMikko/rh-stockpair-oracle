@@ -343,6 +343,47 @@ a salted hash of the remote address. The raw address is never stored — this is
 a usage counter, not a visitor log — and the per-install salt means hashes are
 not comparable across deployments.
 
+## Pro, and paying per call
+
+Two surfaces, two shapes, because they are genuinely different problems.
+
+**Pro — $5.99 for 30 days, no auto-renewal.** Pay USDC on Base to the treasury
+from your own wallet; the server reads the transfer off-chain rather than
+trusting a receipt, so there is no webhook to spoof and no provider to trust.
+A pro subscriber can tag the agent on Farcaster and get an answer straight
+back, and sign in on the dashboard.
+
+Payment entitles an *address*, but autonomous replies check an *FID*, so
+`POST /pro/link-fid` links them — provably, not on request: Farcaster
+publishes the addresses an account has verified, and the signed-in address
+must be among them. The FID inherits the address's existing expiry, because
+issuing a second clock for one payment is how a subscription quietly becomes
+free.
+
+**x402 — pay per call, no account.** An agent that found this in a catalogue
+calls, gets a 402 describing exactly what to pay and where, pays, and calls
+again. Settlement is prepaid credit rather than one transfer per request: a
+USDC transfer costs more in gas and latency than a $0.005 call is worth, so a
+transfer buys a balance that calls draw down. The 402 says so in its own body
+rather than only here.
+
+Off while `PRICING_MODE=launch` — every route is served and the 402 never
+fires, while the price headers say what it will cost.
+
+### What the prices have to cover
+
+Measured, not guessed. The LLM is the only per-unit cost and it is small:
+**$0.00129 per request** over 124 requests, or about **$1.05/month** at the
+current drafting volume.
+
+The important part is that it does not scale with traffic. `/ask` has no model
+in it at all — intent is keyword matching and the text comes from a template —
+so answering a thousand questions costs no LLM credits. Drafting *posts* is
+the only thing that spends them, and posts are rare by design.
+
+So per-call prices cover upstream RPC, and the subscription covers the fixed
+monthly floor. One pro subscriber covers roughly 4,600 LLM requests.
+
 ## Deploying
 
 `docs/DEPLOY.md` is the Hetzner runbook: systemd units in `ops/systemd`, a
