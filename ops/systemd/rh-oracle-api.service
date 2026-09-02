@@ -19,6 +19,10 @@ Environment=PORT=8080
 Environment=HOST=127.0.0.1
 
 # The service reads chain data and writes one SQLite file. Nothing else.
+# Shared box: keep this service from starving whatever else runs here.
+MemoryMax=1G
+CPUWeight=100
+
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

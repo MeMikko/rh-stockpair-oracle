@@ -1,0 +1,50 @@
+# One site block, to be imported by an existing Caddyfile.
+#
+# This is deliberately NOT a whole Caddyfile. The box may already serve other
+# sites, and dropping a replacement /etc/caddy/Caddyfile over them would take
+# them down. Install it alongside instead:
+#
+#   sudo mkdir -p /etc/caddy/conf.d
+#   sudo cp ops/rh-oracle.caddy /etc/caddy/conf.d/
+#   # ensure the main Caddyfile has, at top level:
+#   #   import /etc/caddy/conf.d/*.caddy
+#   sudo caddy validate --config /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy      # reload, not restart: other sites stay up
+#
+# Replace the hostname below. A subdomain of a domain you already own is the
+# best option -- it needs one DNS A record and nothing else.
+
+oracle.example.com {
+	encode zstd gzip
+
+	# Every endpoint is a read. Rate limiting is deliberately generous --
+	# the point of this service is that other agents call it -- but not
+	# unbounded, because /quote and /prepare-swap each cost an RPC round
+	# trip and the upstream is rate limited itself.
+	@expensive path /quote /prepare-swap /gas
+	rate_limit @expensive {
+		zone expensive {
+			key {remote_host}
+			events 60
+			window 1m
+		}
+	}
+
+	rate_limit {
+		zone all {
+			key {remote_host}
+			events 600
+			window 1m
+		}
+	}
+
+	reverse_proxy 127.0.0.1:8080 {
+		health_uri /health
+		health_interval 30s
+	}
+
+	log {
+		output file /var/log/caddy/oracle.log
+		format json
+	}
+}

@@ -12,6 +12,13 @@ ExecStart=/usr/bin/node --env-file-if-exists=/opt/rh-oracle/.env --import tsx sc
 # The volume pass walks 24h of swap logs and takes about an hour.
 TimeoutStartSec=4h
 
+# The volume pass runs for about an hour at sustained network load. On a
+# shared box it must yield to everything else rather than compete with it.
+MemoryMax=1500M
+CPUWeight=20
+IOWeight=20
+Nice=10
+
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

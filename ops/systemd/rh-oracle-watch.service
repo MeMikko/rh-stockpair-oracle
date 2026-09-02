@@ -13,6 +13,10 @@ ExecStart=/usr/bin/node --env-file-if-exists=/opt/rh-oracle/.env --import tsx sc
 Restart=always
 RestartSec=10
 
+MemoryMax=512M
+CPUWeight=50
+Nice=5
+
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

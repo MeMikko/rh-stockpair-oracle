@@ -13,6 +13,10 @@ EnvironmentFile=/opt/rh-oracle/.env
 ExecStart=/usr/bin/node --env-file-if-exists=/opt/rh-oracle/.env --import tsx scripts/agent-scan.ts
 TimeoutStartSec=30min
 
+MemoryMax=512M
+CPUWeight=20
+Nice=10
+
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

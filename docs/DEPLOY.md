@@ -1,8 +1,46 @@
 # Deploying to Hetzner
 
-Runbook for a single Hetzner box running the API, the tip follower, and the
-periodic syncs. One machine is enough: the index is a SQLite file and the
-workload is a handful of RPC reads per request.
+Runbook for a Hetzner box running the API, the tip follower, and the periodic
+syncs. One machine is enough: the index is a SQLite file and the workload is a
+handful of RPC reads per request.
+
+## If the box already runs something else
+
+**Read this first.** Three steps below can take down an existing tenant, and
+two of them do it silently:
+
+| Step | Risk |
+|---|---|
+| `apt install nodejs` from NodeSource | **replaces the system Node**, breaking anything built against the old major |
+| copying a whole `/etc/caddy/Caddyfile` | **removes every other site** the server was serving |
+| `ufw enable` | **drops every port not explicitly allowed**, including the other project's |
+
+So survey first. It changes nothing:
+
+```bash
+bash ops/preflight.sh
+```
+
+Resolve every `CONFLICT` before deploying. In particular this project now
+ships `ops/rh-oracle.caddy` as a **site snippet, not a Caddyfile** — install it
+alongside the existing config and reload rather than restart:
+
+```bash
+sudo mkdir -p /etc/caddy/conf.d
+sudo cp /opt/rh-oracle/ops/rh-oracle.caddy /etc/caddy/conf.d/
+# main Caddyfile needs this once, at top level, outside any site block:
+#   import /etc/caddy/conf.d/*.caddy
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+The services also carry `MemoryMax`, `CPUWeight` and `Nice` so they yield to
+the other tenant — the hourly volume sync runs for an hour at sustained
+network load and is set to lose every contest for CPU and IO.
+
+If you already own a domain for the other project, a subdomain of it
+(`oracle.yourdomain.tld`) is the right hostname here: one DNS A record, a real
+certificate, and a stable URL for the skill catalogue.
 
 ## Sizing
 
@@ -25,6 +63,10 @@ adduser --system --group --home /opt/rh-oracle oracle
 apt update && apt install -y curl git rsync
 
 # Node 22+ is required (node:sqlite, --env-file-if-exists).
+# Node 22+ is required. If the box already has an older Node that another
+# project depends on, do NOT install from NodeSource — it replaces the system
+# binary. Install 22 for the oracle user instead and point ExecStart at it:
+#   curl -fsSL https://fnm.vercel.app/install | bash && fnm install 22
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt install -y nodejs
 
 # Caddy, for TLS.
@@ -41,9 +83,16 @@ mkdir -p /opt/rh-oracle/data && chown -R oracle:oracle /opt/rh-oracle
 Firewall: **80 and 443 only**. The API binds `127.0.0.1:8080` (`HOST` in the
 unit file), so Caddy is the only route in.
 
+On a **fresh** box:
+
 ```bash
 ufw default deny incoming && ufw allow OpenSSH && ufw allow 80,443/tcp && ufw enable
 ```
+
+On a box that already serves something, do **not** run the above — it will cut
+off whatever ports that project uses. If ufw is already active, 80 and 443 are
+almost certainly open already; verify with `ufw status numbered` and add only
+what is missing.
 
 ## Credentials
 
@@ -104,10 +153,13 @@ publish: the hostname contains the IP, so the URL breaks if the box moves, and
 the skill catalogue would have to be corrected by another PR. Buy a name before
 submitting the skill.
 
-Point `ops/Caddyfile` at your hostname, then:
+Point `ops/rh-oracle.caddy` at your hostname, then install it as a snippet
+alongside any existing sites (see the co-tenancy section above):
 
 ```bash
-sudo cp /opt/rh-oracle/ops/Caddyfile /etc/caddy/Caddyfile
+sudo mkdir -p /etc/caddy/conf.d
+sudo cp /opt/rh-oracle/ops/rh-oracle.caddy /etc/caddy/conf.d/
+sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
