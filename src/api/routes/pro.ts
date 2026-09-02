@@ -3,6 +3,8 @@ import { formatUsdc, paymentConfig, priceUnits, tokenGate, PAYMENT_CHAIN_ID } fr
 import { claimPayment } from '../../payments/verify.js';
 import { tierForSession } from '../../auth/session.js';
 import { tokenFrom } from './auth.js';
+import { linkFid, linkedFids } from '../../auth/farcaster.js';
+import { readSession } from '../../auth/session.js';
 
 /**
  * Buying pro, and seeing what it costs.
@@ -36,7 +38,40 @@ export function registerPro(app: FastifyInstance): void {
       tokenGate: tokenGate.enabled
         ? { enabled: true, token: tokenGate.address, minBalance: tokenGate.minBalance }
         : { enabled: false, note: 'token-gated access is planned; no token exists yet' },
-      you: { tier: me.tier, address: me.subject, reason: me.reason },
+      you: {
+        tier: me.tier,
+        address: me.subject,
+        reason: me.reason,
+        linkedFids: me.subject ? linkedFids(me.subject) : [],
+      },
+    };
+  });
+
+  /**
+   * Link a Farcaster account, so a payment made with a wallet also works when
+   * the agent is tagged. Self-service because the link is provable: the FID
+   * must have verified the signed-in address, which neither side gets to
+   * simply assert.
+   */
+  app.post('/pro/link-fid', async (req, reply) => {
+    const session = readSession(tokenFrom(req as never));
+    if (!session) {
+      return reply.code(401).send({ error: 'sign in with the wallet that paid, then link' });
+    }
+    const body = req.body as { fid?: unknown } | undefined;
+    const fid = body?.fid === undefined ? '' : String(body.fid);
+    if (!fid) return reply.code(400).send({ error: 'body must be {"fid": 12345}' });
+
+    const res = await linkFid(session.subject, fid);
+    if (!res.ok) return reply.code(400).send({ ok: false, error: res.error });
+
+    req.log.info(`linked fid ${res.fid} to ${res.address}`);
+    return {
+      ok: true,
+      fid: res.fid,
+      address: res.address,
+      expiresAt: res.expiresAt ? new Date(res.expiresAt).toISOString() : null,
+      note: `Tag the agent on Farcaster from FID ${res.fid} and it will answer directly.`,
     };
   });
 

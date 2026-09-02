@@ -234,6 +234,10 @@ does know. There is no fallback that guesses.</p>
     <input id="txhash" type="text" placeholder="0x… transaction hash, if you paid separately">
     <button type="button" id="claim">Claim</button>
   </div>
+  <div class="askrow" style="margin-top:8px">
+    <input id="fid" type="text" inputmode="numeric" placeholder="your Farcaster FID, to use pro when you tag the agent">
+    <button type="button" id="linkfid">Link</button>
+  </div>
   <div id="proout"></div>
 </div>
 
@@ -405,6 +409,23 @@ Counts on this page are read live from the index at request time.
         refreshWho();
       })
       .catch(function (e) { say(e.message || 'claim failed', 'err'); });
+  });
+
+  $('linkfid').addEventListener('click', function () {
+    var fid = $('fid').value.trim();
+    if (!fid) { say('Enter your Farcaster FID.', 'err'); return; }
+    say('Checking that this FID has verified your address…');
+    fetch('/pro/link-fid', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ fid: fid })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j.ok) { say(j.error || 'link failed', 'err'); return; }
+        say('FID ' + j.fid + ' linked. Tag the agent on Farcaster and it will answer directly.');
+        refreshWho();
+      })
+      .catch(function (e) { say(e.message || 'link failed', 'err'); });
   });
 
   $('signin').addEventListener('click', function () {

@@ -269,3 +269,16 @@ CREATE TABLE IF NOT EXISTS payments (
   expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS payments_payer ON payments(payer);
+
+-- Farcaster accounts linked to a paying address.
+--
+-- The link itself is proved through Neynar (the FID must have verified the
+-- address) and this table only records the result, so a renewal can extend the
+-- FIDs without asking Neynar again. One row per FID: an FID belongs to one
+-- payer at a time.
+CREATE TABLE IF NOT EXISTS fid_links (
+  fid       TEXT PRIMARY KEY,
+  address   TEXT NOT NULL,
+  linked_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS fid_links_address ON fid_links(address);
