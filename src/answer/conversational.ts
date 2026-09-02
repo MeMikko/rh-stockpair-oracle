@@ -79,6 +79,7 @@ export function aboutFacts(): Record<string, string | number> {
     stockTokens: cov.total,
     tokensWithFeed: cov.covered.length,
     endpoints: '/quote /prepare-swap /gas /corporate-actions /coverage /ask',
+    answers: 'stock prices from Chainlink, pool counts, corporate actions, feed coverage, gas, the v3/v4 volume split',
   };
 }
 

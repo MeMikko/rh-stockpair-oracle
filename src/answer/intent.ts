@@ -16,6 +16,7 @@ import { getDb } from '../db/index.js';
  */
 
 export type IntentKind =
+  | 'price'
   | 'pools'
   | 'corporate_action'
   | 'coverage'
@@ -68,6 +69,23 @@ const RULES: Array<{ kind: IntentKind; any: RegExp[]; requires?: (i: Partial<Int
   {
     kind: 'coverage',
     any: [/\bcoverage\b/i, /\bchainlink\b/i, /\bfeeds?\b/i, /\boracle\b/i, /\bdeviation\b/i],
+  },
+  // Before `pools`, and before the bare-symbol fallback below. "what is TSLA
+  // price" matched no keyword at all and fell through to a pool count -- a
+  // confident wrong answer to the most obvious question anyone asks, which is
+  // the failure this classifier exists to avoid.
+  //
+  // "price impact" is excluded: that belongs to a specific pool and routes to
+  // the quote rule instead.
+  {
+    kind: 'price',
+    any: [
+      /\bprice\b(?!\s+impact)/i,
+      /\bworth\b/i,
+      /\btrading at\b/i,
+      /\bhow much\b/i,
+      /\bcost(s|ing)?\b/i,
+    ],
   },
   { kind: 'pools', any: [/\bpools?\b/i, /\bhow many\b/i, /\bpaired\b/i, /\bindexed\b/i] },
   {

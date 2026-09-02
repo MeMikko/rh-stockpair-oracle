@@ -3,6 +3,9 @@ import { classify, type Intent } from './intent.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { upcomingActions } from '../corporate/calendar.js';
 import { readGas } from '../pricing/gas.js';
+import { feedFor } from '../registry/feeds.js';
+import { readFeed } from '../pricing/chainlink.js';
+import { marketStatus } from '../pricing/marketHours.js';
 import { verifyDraft } from '../agent/verify.js';
 import { aboutFacts, conversationalAnswer, conversationalConfig } from './conversational.js';
 import type { Tier } from '../entitlements/index.js';
@@ -31,8 +34,9 @@ export interface Answer {
 }
 
 const NO_IDEA =
-  'I only answer from indexed Robinhood Chain data: pool counts, upcoming corporate ' +
-  'actions, Chainlink coverage, gas and the v3/v4 volume split. Name a ticker or a pool id.';
+  'I only answer from indexed Robinhood Chain data: stock prices from Chainlink, pool ' +
+  'counts, upcoming corporate actions, feed coverage, gas, and the v3/v4 volume split. ' +
+  'Name a ticker or a pool id.';
 
 function poolCounts(symbol: string): { v4: number; v3: number; total: number } {
   const db = getDb();
@@ -53,6 +57,57 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
   const base = { intent, answered: true as boolean };
 
   switch (intent.kind) {
+    case 'price': {
+      // The stock's own USD price, from its Chainlink feed. This is a chain
+      // read, not an index lookup, and it is the answer to the most common
+      // question there is -- which until now fell through to a pool count.
+      if (!intent.symbol) break;
+      const feed = feedFor(intent.symbol);
+      if (!feed) {
+        // Refusing here is the point. 159 of 194 tokens have no feed, and a
+        // pool's implied price is not the stock's price: it is whatever the
+        // other side of that pool is worth.
+        return {
+          ...base,
+          facts: { symbol: intent.symbol },
+          text:
+            `${intent.symbol} has no Chainlink feed on Robinhood Chain, so there is no ` +
+            `oracle price for it. A pool quoting ${intent.symbol} implies a price for the ` +
+            `token paired against it, not for ${intent.symbol} itself.`,
+          reproduce: 'GET /coverage',
+        };
+      }
+
+      const market = marketStatus(now);
+      try {
+        const read = await readFeed(feed);
+        return {
+          ...base,
+          facts: {
+            symbol: intent.symbol,
+            priceUsd: read.priceUsd,
+            ageSeconds: read.ageSeconds,
+            stale: read.stale,
+            marketOpen: market.isOpen,
+            session: market.session,
+          },
+          text:
+            `${intent.symbol} is $${read.priceUsd} per the Chainlink feed on Robinhood Chain, ` +
+            `updated ${read.ageSeconds}s ago. The underlying market is ${market.session}` +
+            `${market.isOpen ? '' : ', so on-chain pools can drift from this'}.`,
+          reproduce: 'GET /coverage',
+        };
+      } catch {
+        return {
+          ...base,
+          facts: { symbol: intent.symbol },
+          text: `The Chainlink feed for ${intent.symbol} could not be read just now.`,
+          reproduce: 'GET /coverage',
+          answered: false,
+        };
+      }
+    }
+
     case 'pools': {
       if (!intent.symbol) break;
       const c = poolCounts(intent.symbol);

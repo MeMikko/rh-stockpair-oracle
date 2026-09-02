@@ -47,6 +47,28 @@ describe('classify', () => {
     expect(i.poolRef).toMatch(/^0x/);
   });
 
+  /**
+   * The misclassification that mattered most: a price question answered with a
+   * pool count. It matched no keyword and fell through to the bare-symbol
+   * fallback, which assumed pools -- confidently wrong about the most obvious
+   * question anyone asks.
+   */
+  it('routes a price question to price, not to pool counts', () => {
+    expect(classify('what is TSLA price?').kind).toBe('price');
+    expect(classify('what is NVDA worth').kind).toBe('price');
+    expect(classify('how much is AAPL').kind).toBe('price');
+    expect(classify('what is ON costing').kind).toBe('price');
+  });
+
+  it('still sends price impact to the quote route', () => {
+    // "price impact" belongs to a specific pool, not to the stock.
+    expect(classify('price impact on 0x' + 'a'.repeat(64)).kind).toBe('quote');
+  });
+
+  it('keeps an explicit pool question on pools', () => {
+    expect(classify('how many pools quote NVDA?').kind).toBe('pools');
+  });
+
   it('gives up rather than guessing', () => {
     expect(classify('what is the weather in Helsinki?').kind).toBe('unknown');
     expect(classify('gm').kind).toBe('unknown');
