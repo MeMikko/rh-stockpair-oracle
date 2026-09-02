@@ -315,7 +315,11 @@ export async function answerQuestion(
         };
       }
       if (c.rejected) {
-        console.error(`[answer] conversational reply rejected: ${c.rejected.join(', ')}`);
+        // Never log an empty reason: a rejection with nothing after the colon
+        // is how this bug hid, saying a reply had been discarded and not why.
+        console.error(
+          `[answer] conversational reply rejected: ${c.rejected.join(', ') || 'no reason recorded'}`,
+        );
       }
     }
   }

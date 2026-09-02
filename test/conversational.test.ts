@@ -82,6 +82,25 @@ describe('conversational fallback', () => {
     expect((await conversationalAnswer('hi', FALLBACK)).usedModel).toBe(false);
   });
 
+  /**
+   * verifyDraft's `ok` also enforces the 280-character cast limit, which is
+   * the right rule for a post and the wrong one for a reply on a web page.
+   * Reusing it rejected every well-behaved answer on length while reporting no
+   * unsupported numbers at all — so the log said a reply had been discarded
+   * and could not say why.
+   */
+  it('accepts a reply longer than a cast but within its own limit', async () => {
+    const long =
+      'I index tokenized stock pools on Robinhood Chain and answer questions about pool ' +
+      'counts, corporate actions, feed coverage and the split between Uniswap versions. ' +
+      'Ask about a ticker and I will tell you what the index holds for it right now.';
+    expect(long.length).toBeGreaterThan(280);
+    vi.stubGlobal('fetch', async () => reply(long));
+    const r = await conversationalAnswer('introduce yourself', FALLBACK);
+    expect(r.usedModel).toBe(true);
+    expect(r.text).toBe(long);
+  });
+
   it('falls back rather than truncating an over-long reply', async () => {
     vi.stubGlobal('fetch', async () => reply('word '.repeat(400)));
     const r = await conversationalAnswer('hi', FALLBACK);

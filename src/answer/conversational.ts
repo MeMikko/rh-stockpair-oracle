@@ -138,12 +138,21 @@ export async function conversationalAnswer(
     return { text: fallback, usedModel: false, rejected: ['too long'] };
   }
 
+  // Only the numeric check applies here, not verifyDraft's `ok`.
+  //
+  // `ok` also enforces MAX_POST_LENGTH, which is the 280-character limit of a
+  // cast -- the right rule for a post and the wrong one for a reply on a web
+  // page. Reusing it rejected every well-behaved answer on length while
+  // reporting an empty list of unsupported numbers, so the log said a reply
+  // had been rejected and could not say why. Length is bounded above by
+  // maxChars instead.
   const v = verifyDraft(text, facts);
-  if (!v.ok) {
+  if (v.unsupported.length > 0) {
     // The model cited a number that is not in the facts. That is exactly the
     // failure this check exists for, and the reply is discarded rather than
     // trimmed or explained away.
     return { text: fallback, usedModel: false, rejected: v.unsupported };
   }
+  if (!text.trim()) return { text: fallback, usedModel: false, rejected: ['empty'] };
   return { text, usedModel: true };
 }
