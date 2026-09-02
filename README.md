@@ -1,5 +1,8 @@
 # Robinhood Chain Stock-Pair Oracle
 
+Live at **[oracle.sb4s.xyz](https://oracle.sb4s.xyz)**, speaking on Farcaster as
+**[@vates](https://farcaster.xyz/vates)**.
+
 Pricing for Uniswap v4 pools on **Robinhood Chain (chain id 4663)** where one
 side is a tokenized stock or ETF. Deterministic: no model sits in the data path.
 

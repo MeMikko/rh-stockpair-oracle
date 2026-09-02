@@ -1,6 +1,7 @@
 import { getDb } from '../db/index.js';
 import { verifyDraft } from '../agent/verify.js';
 import { computeCoverage } from '../registry/coverage.js';
+import { agentIdentity } from '../../config/agent.js';
 
 /**
  * The one place a model is allowed to answer, and the narrow way it may.
@@ -39,8 +40,10 @@ export const conversationalConfig = {
   maxChars: 480,
 };
 
-const SYSTEM_PROMPT = `You are the RH stock-pair oracle: a data service for Robinhood Chain
-(chain 4663) that indexes Uniswap v4 and v3 pools where one side is a tokenized stock or ETF.
+const SYSTEM_PROMPT = `You are ${agentIdentity.name}, the account that speaks for the
+${agentIdentity.service}: a data service for Robinhood Chain (chain 4663) that indexes Uniswap
+v4 and v3 pools where one side is a tokenized stock or ETF. Introduce yourself by name when
+asked who you are.
 
 You are answering a question the deterministic classifier could not route. Explain what this
 service is or what it can answer. Be brief and plain.
@@ -78,6 +81,8 @@ export function aboutFacts(): Record<string, string | number> {
     stockPairedV3: n("SELECT COUNT(*) AS n FROM pools_v3 WHERE quote_kind = 'stock'"),
     stockTokens: cov.total,
     tokensWithFeed: cov.covered.length,
+    name: agentIdentity.name,
+    farcaster: '@' + agentIdentity.farcasterHandle,
     endpoints: '/quote /prepare-swap /gas /corporate-actions /coverage /ask',
     answers: 'stock prices from Chainlink, pool counts, corporate actions, feed coverage, gas, the v3/v4 volume split',
   };

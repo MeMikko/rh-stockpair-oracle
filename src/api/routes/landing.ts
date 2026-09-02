@@ -3,6 +3,7 @@ import { getDb } from '../../db/index.js';
 import { ROUTE_PRICES, pricingMode } from '../../../config/pricing.js';
 import { formatUsdc, paymentConfig, priceUnits, PAYMENT_CHAIN_ID } from '../../../config/payments.js';
 import { authConfigured } from '../../auth/session.js';
+import { agentIdentity } from '../../../config/agent.js';
 
 /**
  * The page a human gets at the root.
@@ -374,7 +375,7 @@ function page(s: Stats): string {
 
 <header><div class="bar">
   <div class="brand"><span class="dot"></span>
-    <span>RH stock-pair oracle<small>Robinhood Chain · 4663</small></span>
+    <span>RH stock-pair oracle<small>Robinhood Chain · 4663 · ${esc(agentIdentity.name)}</small></span>
   </div>
   <span class="pill" id="tierpill" hidden></span>
   <button id="connect" class="primary">Connect wallet</button>
@@ -487,6 +488,8 @@ RH data source indexes v4 alone.
 
 <footer>
 <a href="https://github.com/MeMikko/rh-stockpair-oracle">github.com/MeMikko/rh-stockpair-oracle</a>
+ · <a href="${esc(agentIdentity.farcasterUrl)}">@${esc(agentIdentity.farcasterHandle)} on Farcaster</a>
+ — tag it there and, with pro, it answers directly.
 </footer>
 </main>
 <script>${clientScript()}</script>
