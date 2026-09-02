@@ -11,6 +11,8 @@
   },
   "setup": [
     "Base URL: https://oracle.sb4s.xyz — read-only, no key needed in launch mode",
+    "START HERE: GET /.well-known/agent.json — machine-readable endpoints, auth methods, payment details and limits. Also GET / with Accept: application/json",
+    "Auth, all live: x402 per call (402 -> pay -> retry with x-payment header, becomes prepaid credit); wallet signature for a session; $5.99/30d pro for direct Farcaster answers",
     "NOT a free service: launch mode serves without charge; every response carries x-oracle-price-usd, x-oracle-charged-usd and x-oracle-pricing. Read them, do not hardcode a price",
     "Chain: Robinhood (4663) — abort if the Bankr wallet does not support 4663",
     "Covers Uniswap v4 AND v3: v3 carries ~37% of stock-paired volume, 3 of the top 5 pools",

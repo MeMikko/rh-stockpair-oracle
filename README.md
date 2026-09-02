@@ -346,6 +346,19 @@ a salted hash of the remote address. The raw address is never stored — this is
 a usage counter, not a visitor log — and the per-install salt means hashes are
 not comparable across deployments.
 
+## Finding out what this is, as a machine
+
+`GET /.well-known/agent.json` describes every endpoint, all three access
+methods, the payment details and the known limits. It is also what `GET /`
+returns when the client sends `Accept: application/json`, and every response
+carries `Link: </.well-known/agent.json>; rel="service-desc"`.
+
+That document exists because an external agent tested the whole API twice and
+reported "authentication and billing specs missing" both times — while x402
+and wallet sign-in were live throughout. It never fetched the landing page,
+because agents do not read HTML. Anything that exists only in prose on a web
+page does not exist for the callers this service is built for.
+
 ## Pro, and paying per call
 
 Two surfaces, two shapes, because they are genuinely different problems.

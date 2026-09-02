@@ -4,6 +4,7 @@ import { ROUTE_PRICES, pricingMode } from '../../../config/pricing.js';
 import { formatUsdc, paymentConfig, priceUnits, PAYMENT_CHAIN_ID } from '../../../config/payments.js';
 import { authConfigured } from '../../auth/session.js';
 import { agentIdentity } from '../../../config/agent.js';
+import { serviceDescriptor } from './discovery.js';
 
 /**
  * The page a human gets at the root.
@@ -474,6 +475,22 @@ required, while each response publishes what the call will cost once billing is 
 x-oracle-charged-usd: 0      what it cost you today
 x-oracle-pricing: ${esc(pricingMode)}     the current mode</code></pre>
 
+<h2>Access and payment</h2>
+<p>Three ways in, all live today. In <strong>${esc(pricingMode)} mode</strong> none is required
+yet — every route is served without charge — but each already works, and the machine-readable
+description at <code>/.well-known/agent.json</code> carries the details.</p>
+<table>
+<tr><th>Method</th><th>For</th><th>How</th></tr>
+<tr><td><code>x402</code></td><td>agents, per call, no account</td>
+<td>Call a priced route with no credential → <code>402</code> with what to pay and where. Pay, then
+retry with <code>x-payment: &lt;tx hash&gt;</code>. The transfer becomes prepaid credit.</td></tr>
+<tr><td>wallet signature</td><td>session-based access</td>
+<td><code>GET /auth/nonce</code> → sign → <code>POST /auth/verify</code> → bearer token.</td></tr>
+<tr><td>pro</td><td>Farcaster answers + unmetered</td>
+<td>${formatUsdc(priceUnits())} USDC for ${paymentConfig.periodDays} days, then
+<code>POST /pro/claim</code>.</td></tr>
+</table>
+
 <h2>Read the labels</h2>
 <div class="note">
 <code>deviation: null</code> is normal and <strong>must never be read as zero</strong>:
@@ -500,7 +517,16 @@ RH data source indexes v4 alone.
 }
 
 export function registerLanding(app: FastifyInstance): void {
-  app.get('/', async (_req, reply) => {
+  app.get('/', async (req, reply) => {
+    // An agent that asks for JSON gets the service description rather than a
+    // page it cannot read. The previous behaviour returned HTML to everyone,
+    // which is why two external test runs concluded the auth methods did not
+    // exist -- they were documented only in markup.
+    const accept = String(req.headers.accept ?? '');
+    if (accept.includes('application/json') && !accept.includes('text/html')) {
+      reply.header('cache-control', 'public, max-age=300');
+      return serviceDescriptor();
+    }
     reply.header('content-type', 'text/html; charset=utf-8');
     reply.header('cache-control', 'public, max-age=60');
     return page(readStats());

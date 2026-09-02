@@ -10,6 +10,7 @@ import { registerWebhook } from './routes/webhook.js';
 import { registerAuth } from './routes/auth.js';
 import { registerPro } from './routes/pro.js';
 import { registerData } from './routes/data.js';
+import { registerDiscovery } from './routes/discovery.js';
 import { registerX402 } from './x402.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { getDb } from '../db/index.js';
@@ -114,5 +115,6 @@ export function buildServer() {
   registerAuth(app);
   registerPro(app);
   registerData(app);
+  registerDiscovery(app);
   return app;
 }

@@ -181,6 +181,25 @@ set — so it is deterministic and safe to call in a loop.
 A question it cannot classify returns `answered: false` and says what it does
 know. There is no fallback that guesses.
 
+## Access and payment
+
+**Start here: `GET /.well-known/agent.json`.** A machine-readable description
+of every endpoint, the three access methods, the payment details and the
+limits. Also served from `GET /` when you send `Accept: application/json`, and
+advertised in a `Link: rel="service-desc"` header on every response.
+
+Three methods, all live:
+
+| Method | For | How |
+|---|---|---|
+| **x402** | agents, per call, no account | Call a priced route with no credential → `402` carrying chain, asset, amount and address. Pay, retry with `x-payment: <tx hash>`. The transfer becomes prepaid credit that calls draw down — a transfer costs more in gas than one $0.005 call is worth. Balance: `GET /x402/balance?payer=0x…` |
+| **wallet signature** | session-based | `GET /auth/nonce?address=0x…` returns the exact message to sign → `personal_sign` → `POST /auth/verify {address, signature, nonce}` → bearer token |
+| **pro** | direct answers on Farcaster, unmetered | $5.99 USDC on Base for 30 days, `POST /pro/claim {txHash}`. Does not auto-renew. `POST /pro/link-fid {fid}` links a Farcaster account |
+
+In **launch mode** none is required — every route is served without charge —
+but each already works, and `x-oracle-pricing` tells you which mode you are in.
+Read that header rather than assuming.
+
 ## Agent guidance
 
 - **Never treat `deviation: null` as zero.** Check `deviationReason`. Most
