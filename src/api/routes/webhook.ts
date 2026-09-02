@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { answerQuestion } from '../../answer/answer.js';
 import { verifyDraft } from '../../agent/verify.js';
 import { enqueue } from '../../agent/queue.js';
-import { saveMentionSignal, signalForMention, type Mention } from '../../agent/mentions.js';
+import { saveMentionSignal, signalForMention, questionFromCast, type Mention } from '../../agent/mentions.js';
 import { decide, recordAutoReply, alreadyAutoReplied } from '../../agent/autonomy.js';
 import { tierForFid } from '../../entitlements/index.js';
 import { farcaster } from '../../agent/publish/farcaster.js';
@@ -157,7 +157,7 @@ export function registerWebhook(app: FastifyInstance): void {
     }
 
     const tier = mention.authorFid ? tierForFid(mention.authorFid).tier : 'free';
-    const a = await answerQuestion(mention.text, new Date(), { tier });
+    const a = await answerQuestion(questionFromCast(mention.text), new Date(), { tier });
     const verification = verifyDraft(a.text, signal.facts);
     if (!verification.ok) {
       req.log.error(

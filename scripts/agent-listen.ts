@@ -6,6 +6,7 @@ import {
   neynarConfigured,
   saveMentionSignal,
   signalForMention,
+  questionFromCast,
   unanswered,
   type Mention,
 } from '../src/agent/mentions.js';
@@ -95,7 +96,7 @@ async function pass(): Promise<number> {
     }
 
     const tier = m.authorFid ? tierForFid(m.authorFid).tier : 'free';
-    const a = await answerQuestion(m.text, new Date(), { tier });
+    const a = await answerQuestion(questionFromCast(m.text), new Date(), { tier });
     const verification = verifyDraft(a.text, signal.facts);
     if (!verification.ok) {
       // A template failing verification is a bug, not a rejection, so it is

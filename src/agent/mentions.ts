@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { getDb } from '../db/index.js';
 import { answerQuestion } from '../answer/answer.js';
 import { tierForFid } from '../entitlements/index.js';
+import { agentIdentity } from '../../config/agent.js';
 import { saveSignals, type Signal } from './signals.js';
 
 /**
@@ -89,6 +90,37 @@ export async function fetchMentions(fid: string, limit = 25): Promise<Mention[]>
 }
 
 /**
+ * The part of a cast that is actually the question.
+ *
+ * A mention arrives as the whole post, and the question addressed to the agent
+ * is normally whatever follows the handle. Classifying the entire cast reads
+ * the author's own prose as a query: an announcement mentioning "an oracle"
+ * and linking oracle.sb4s.xyz was answered with feed-coverage statistics,
+ * because the coverage rule matches the word `oracle` and our own domain
+ * contains it. That would have happened on every cast that shared the link.
+ *
+ * So take what follows the handle when there is anything there, and strip
+ * URLs either way. A link is never the question, and ours in particular
+ * carries a keyword that would otherwise match wherever it appeared.
+ */
+export function questionFromCast(text: string, handle = agentIdentity.farcasterHandle): string {
+  const withoutUrls = text
+    .replace(/\bhttps?:\/\/\S+/gi, ' ')
+    .replace(/\b[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)*\.[a-z]{2,24}\b(?:\/\S*)?/gi, ' ');
+
+  const at = new RegExp(`@${handle}\\b`, 'i');
+  const m = withoutUrls.match(at);
+  if (m && m.index !== undefined) {
+    const after = withoutUrls.slice(m.index + m[0].length).trim();
+    if (after.length > 0) return after;
+  }
+
+  // Mention at the very end, or none found: fall back to the whole cast with
+  // handles removed, which is still better than leaving a link in it.
+  return withoutUrls.replace(/@[a-z0-9_.-]+/gi, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
  * Mentions not already dealt with — queued for approval *or* answered
  * autonomously. Both paths have to be consulted, or a restart would answer
  * the same cast twice by two different routes.
@@ -115,7 +147,7 @@ export async function signalForMention(
   // question. Without passing it, a pro subscriber tagging the agent got the
   // canned refusal that a stranger gets.
   const tier = m.authorFid ? tierForFid(m.authorFid).tier : 'free';
-  const a = await answerQuestion(m.text, new Date(), { tier });
+  const a = await answerQuestion(questionFromCast(m.text), new Date(), { tier });
   const id = createHash('sha256').update(`mention:${m.hash}`).digest('hex').slice(0, 16);
 
   return {
