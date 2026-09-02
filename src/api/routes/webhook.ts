@@ -48,6 +48,13 @@ export function verifySignature(rawBody: string, signature: string | undefined):
   return timingSafeEqual(a, b);
 }
 
+/** The digest we expect, for diagnostics only. Null when no secret is set. */
+function computedDigest(rawBody: string): string | null {
+  const secret = process.env.NEYNAR_WEBHOOK_SECRET?.trim();
+  if (!secret) return null;
+  return createHmac('sha512', secret).update(rawBody).digest('hex');
+}
+
 interface CastCreated {
   type?: string;
   data?: {
@@ -95,9 +102,31 @@ export function registerWebhook(app: FastifyInstance): void {
     }
 
     const raw = (req as unknown as { rawBody?: string }).rawBody ?? '';
-    const sig = req.headers[SIGNATURE_HEADER];
-    if (!verifySignature(raw, Array.isArray(sig) ? sig[0] : sig)) {
-      req.log.warn('rejected webhook with a bad or missing signature');
+    const sigHeader = req.headers[SIGNATURE_HEADER];
+    const sig = Array.isArray(sigHeader) ? sigHeader[0] : sigHeader;
+    if (!verifySignature(raw, sig)) {
+      // A rejection has three quite different causes -- wrong secret, wrong
+      // header, wrong algorithm -- and "bad signature" distinguishes none of
+      // them. Log the shape of what arrived against the shape of what was
+      // expected: lengths identify the algorithm, a matching length with a
+      // different prefix means the secret differs, and no candidate header at
+      // all means the name is wrong. The secret is never logged, and only the
+      // first bytes of a digest, which prove nothing on their own.
+      const candidates = Object.keys(req.headers).filter(
+        (h) => h.includes('signature') || h.includes('neynar'),
+      );
+      req.log.warn(
+        {
+          expectedHeader: SIGNATURE_HEADER,
+          signatureHeadersPresent: candidates.length > 0 ? candidates : 'NONE',
+          receivedLength: sig?.length ?? 0,
+          receivedPrefix: sig?.slice(0, 8) ?? '',
+          computedLength: computedDigest(raw)?.length ?? 0,
+          computedPrefix: computedDigest(raw)?.slice(0, 8) ?? '',
+          bodyBytes: raw.length,
+        },
+        'rejected webhook: signature did not verify',
+      );
       return reply.code(401).send({ error: 'bad signature' });
     }
 
