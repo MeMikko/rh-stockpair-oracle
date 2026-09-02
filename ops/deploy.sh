@@ -23,6 +23,9 @@ rsync -az --delete \
 	./ "${TARGET}:${REMOTE_DIR}/"
 
 echo "==> installing dependencies"
+# tsx is a runtime dependency here, not a build tool: every service runs
+# `node --import tsx`. It lives in "dependencies" for that reason, so
+# --omit=dev is safe -- but only because of that.
 ssh "${TARGET}" "cd ${REMOTE_DIR} && npm ci --omit=dev --no-audit --no-fund || npm install --omit=dev --no-audit --no-fund"
 
 echo "==> checking .env exists on the server"

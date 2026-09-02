@@ -166,6 +166,41 @@ Both backfills commit their cursor after every range, so an interrupted run
 resumes where it stopped — just run it again. Run them under `tmux` or
 `systemd-run --scope` so an SSH drop does not kill them.
 
+### When the reverse proxy is a Caddy container
+
+Common, and it changes two things. Detect it with `ops/preflight.sh`, which
+reports who actually owns 80/443.
+
+**The config file.** A caddy container typically bind-mounts a *single*
+Caddyfile, so a new file dropped on the host is invisible inside it and the
+`conf.d` snippet approach does not apply. Adding a mount means recreating the
+container, which takes the existing site down. Append to the mounted file
+instead and reload:
+
+```bash
+CF=/opt/<project>/deploy/Caddyfile          # from `docker inspect ... .Mounts`
+cp "$CF" "$CF.bak-$(date +%F)"
+cat /opt/rh-oracle/ops/rh-oracle-docker-caddy.snippet >> "$CF"
+docker exec <caddy-container> caddy validate --config /etc/caddy/Caddyfile
+docker exec <caddy-container> caddy reload  --config /etc/caddy/Caddyfile
+```
+
+`reload` is graceful — the existing site serves throughout. Never `restart`.
+
+**The upstream address.** `127.0.0.1:8080` inside a container is the container
+itself, not the host, so the usual loopback binding is unreachable. Use the
+gateway of the container's own Docker network:
+
+```bash
+docker inspect <caddy-container>   --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}'   # e.g. 172.18.0.1
+```
+
+Set `HOST` to that address in `/opt/rh-oracle/.env` and point `reverse_proxy`
+at it. That address is reachable from containers and the host and is never
+routable from the internet, so the origin stays closed even if a firewall rule
+is later changed by mistake — which `HOST=0.0.0.0` plus a ufw rule would not
+survive.
+
 ### Behind Cloudflare
 
 A proxied A record (orange cloud) means Cloudflare terminates TLS at its edge,

@@ -1,0 +1,36 @@
+# Site block for a Caddy running in Docker.
+#
+# Append this to the Caddyfile that the existing caddy container already
+# bind-mounts, then reload. It is not a separate file: a container that mounts
+# a single Caddyfile cannot see new files on the host, and adding a mount means
+# recreating the container -- which takes the existing site down.
+#
+#   cp <caddyfile> <caddyfile>.bak-$(date +%F)
+#   cat ops/rh-oracle-docker-caddy.snippet >> <caddyfile>
+#   docker exec <caddy-container> caddy validate --config /etc/caddy/Caddyfile
+#   docker exec <caddy-container> caddy reload  --config /etc/caddy/Caddyfile
+#
+# `reload` is graceful: the existing site keeps serving throughout.
+#
+# The upstream address is the gateway of the container's own Docker network,
+# not 127.0.0.1 -- inside a container that is the container itself. Find it
+# with:
+#
+#   docker inspect <caddy-container> \
+#     --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}'
+#
+# and bind the API to the same address (HOST in /opt/rh-oracle/.env). That
+# address is reachable from containers and from the host, and is never
+# routable from the internet -- so the origin is not exposed even if a
+# firewall rule is later changed by mistake.
+
+oracle.sb4s.xyz {
+	tls {$ACME_EMAIL}
+	encode zstd gzip
+
+	# Match the gateway of the caddy container's network and the API's HOST.
+	reverse_proxy 172.18.0.1:8080 {
+		health_uri /health
+		health_interval 30s
+	}
+}
