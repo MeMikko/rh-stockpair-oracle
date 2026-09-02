@@ -120,6 +120,26 @@ pre code{background:none;border:0;padding:0}
 a{color:var(--acc)}
 .note{border-left:2px solid var(--line);padding-left:14px;color:var(--dim);margin:14px 0}
 footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:var(--dim);font-size:.85rem}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.askrow{display:flex;gap:8px}
+#q{flex:1;min-width:0;padding:11px 13px;font:inherit;color:var(--fg);background:var(--card);
+   border:1px solid var(--line);border-radius:8px}
+#q:focus{outline:2px solid var(--acc);outline-offset:-1px}
+#go{padding:11px 18px;font:inherit;font-weight:500;color:#fff;background:var(--acc);
+    border:0;border-radius:8px;cursor:pointer}
+#go[disabled]{opacity:.55;cursor:default}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0}
+.chips button{font:inherit;font-size:.8rem;color:var(--dim);background:none;
+  border:1px solid var(--line);border-radius:999px;padding:4px 11px;cursor:pointer}
+.chips button:hover{color:var(--fg);border-color:var(--dim)}
+.ans{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin:14px 0 0}
+.ans p{margin:0}
+.ans .meta{color:var(--dim);font-size:.8rem;margin-top:10px;display:flex;flex-wrap:wrap;gap:6px 14px}
+.ans details{margin-top:10px}
+.ans summary{cursor:pointer;color:var(--dim);font-size:.8rem}
+.ans pre{margin:8px 0 0}
+.unans{border-left:2px solid var(--dim)}
+.err{border-left:2px solid #c0392b}
 </style></head><body><div class="wrap">
 
 <h1>RH stock-pair oracle</h1>
@@ -152,13 +172,29 @@ are v3. Every other RH data source indexes v4 alone.
 </div>
 
 <h2>Ask it something</h2>
-<pre><code>curl -X POST https://oracle.sb4s.xyz/ask \\
-  -H 'content-type: application/json' \\
-  -d '{"question":"when is the next NVDA dividend?"}'</code></pre>
+<form id="askform" autocomplete="off">
+  <label class="vh" for="q">Question</label>
+  <div class="askrow">
+    <input id="q" name="q" type="text" maxlength="500" placeholder="when is the next NVDA dividend?">
+    <button type="submit" id="go">Ask</button>
+  </div>
+</form>
+<div class="chips" id="chips">
+  <button type="button" data-q="how many pools quote NVDA?">pools quoting NVDA</button>
+  <button type="button" data-q="what is the v3 v4 volume split?">v3 / v4 volume split</button>
+  <button type="button" data-q="does TSLA have a chainlink feed?">TSLA feed coverage</button>
+  <button type="button" data-q="is the gas subsidy still active?">gas subsidy</button>
+</div>
+<div id="out" aria-live="polite"></div>
+
 <p>Every answer carries the <code>facts</code> behind it and a <code>reproduce</code> field
 naming the call that reproduces it — so a caller can <em>verify</em> the answer rather than
 trust it. A question it cannot classify returns <code>answered: false</code> and says what it
 does know. There is no fallback that guesses.</p>
+
+<pre><code>curl -X POST https://oracle.sb4s.xyz/ask \\
+  -H 'content-type: application/json' \\
+  -d '{"question":"when is the next NVDA dividend?"}'</code></pre>
 
 <h2>Endpoints</h2>
 <table>
@@ -195,7 +231,71 @@ Source and full documentation:
 Counts on this page are read live from the index at request time.
 </footer>
 
-</div></body></html>`;
+</div>
+<script>
+(function () {
+  var form = document.getElementById('askform');
+  var input = document.getElementById('q');
+  var go = document.getElementById('go');
+  var out = document.getElementById('out');
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; });
+  }
+
+  function render(data) {
+    // An unanswered question is shown as such rather than dressed up. The
+    // service refusing to guess is a feature, and hiding it would teach
+    // people to expect an answer to anything.
+    var cls = data.answered ? 'ans' : 'ans unans';
+    var facts = JSON.stringify(data.facts, null, 2);
+    var hasFacts = data.facts && Object.keys(data.facts).length > 0;
+    out.innerHTML =
+      '<div class="' + cls + '">' +
+        '<p>' + esc(data.answer) + '</p>' +
+        '<div class="meta">' +
+          '<span>intent: <code>' + esc(data.intent) + '</code></span>' +
+          (data.symbol ? '<span>symbol: <code>' + esc(data.symbol) + '</code></span>' : '') +
+          '<span>reproduce: <code>' + esc(data.reproduce) + '</code></span>' +
+          (data.caller ? '<span>you: <code>' + esc(data.caller.tier) + '</code></span>' : '') +
+        '</div>' +
+        (hasFacts
+          ? '<details><summary>facts behind this answer</summary><pre><code>' +
+            esc(facts) + '</code></pre></details>'
+          : '') +
+      '</div>';
+  }
+
+  function ask(q) {
+    if (!q) return;
+    go.disabled = true;
+    out.innerHTML = '<div class="ans"><p style="color:var(--dim)">asking…</p></div>';
+    fetch('/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question: q })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.j && res.j.error ? res.j.error : 'request failed');
+        render(res.j);
+      })
+      .catch(function (e) {
+        out.innerHTML = '<div class="ans err"><p>' + esc(e.message || 'request failed') + '</p></div>';
+      })
+      .then(function () { go.disabled = false; });
+  }
+
+  form.addEventListener('submit', function (e) { e.preventDefault(); ask(input.value.trim()); });
+  document.getElementById('chips').addEventListener('click', function (e) {
+    var q = e.target && e.target.getAttribute('data-q');
+    if (!q) return;
+    input.value = q;
+    ask(q);
+  });
+})();
+</script>
+</body></html>`;
 }
 
 export function registerLanding(app: FastifyInstance): void {
