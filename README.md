@@ -520,6 +520,15 @@ and `getL1BaseFeeEstimate` are both `0`, and a plain transfer estimates 21,000
 gas with `gasForL1: 0` — about 0.000007 ETH. Congestion is currently ~94% of
 the gas price (`312692000` of `332692000` wei), with the floor at `20000000`.
 
+**Samples are taken on a schedule, not on request.** The evidence used to
+accumulate only when something called `/gas`, so the window measured traffic
+rather than the chain — nineteen samples over nine hours were one external
+test and a few curls, and with no callers the thirty-sample threshold would
+have taken days. The subsidy this project exists to warn about could have
+ended unremarked. The tip follower now samples every five minutes, which
+reaches thirty samples in two and a half hours whether or not anyone is
+looking.
+
 **Why the window matters.** During testing the instantaneous L1 reading went
 non-zero (a transfer estimated 21,186 gas with `gasForL1: 21`) and reverted to
 zero minutes later. A naive one-sample flag would have reported the subsidy as

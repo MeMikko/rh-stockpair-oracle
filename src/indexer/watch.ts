@@ -2,6 +2,7 @@ import { getClient, env } from '../../config/chain.js';
 import { getCursor, setCursor } from '../db/index.js';
 import { fetchInitializeRange, savePools } from './initialize.js';
 import { fetchV3PoolsRange, saveV3Pools } from './v3.js';
+import { readGas } from '../pricing/gas.js';
 
 /**
  * Both protocols are followed. v3 carries roughly a third of stock-paired
@@ -18,8 +19,23 @@ const STREAMS = [
  * reliable filter support, and RH blocks are ~0.25s so a short poll keeps up.
  * Lags the tip by `confirmations` blocks to avoid reorg churn.
  */
+/**
+ * How often to take a gas sample from inside the follower.
+ *
+ * The subsidy evidence used to accumulate only when something called /gas, so
+ * the window measured *traffic* rather than the chain: nineteen samples over
+ * nine hours were an external test and a few curls, and with no callers the
+ * thirty-sample threshold would take days to reach. The subsidy this project
+ * exists to warn about could end unremarked in the meantime.
+ *
+ * Five minutes gives thirty samples in two and a half hours, and a window that
+ * means the same thing whether or not anyone is looking.
+ */
+const GAS_SAMPLE_MS = 5 * 60_000;
+
 export async function watch(opts: { intervalMs?: number; confirmations?: number } = {}): Promise<void> {
   const interval = opts.intervalMs ?? 5_000;
+  let lastGasSample = 0;
   const confirmations = BigInt(opts.confirmations ?? 5);
   const client = getClient();
   const chunk = BigInt(env.logChunk);
@@ -49,6 +65,26 @@ export async function watch(opts: { intervalMs?: number; confirmations?: number 
     } catch (err) {
       console.error('[watch]', (err as Error).message);
     }
+
+    // Sampled here rather than on request, so the evidence reflects the chain
+    // rather than who happened to be calling. Failures are ignored: a missed
+    // sample is a gap in the window, not a reason to stop following the tip.
+    if (Date.now() - lastGasSample >= GAS_SAMPLE_MS) {
+      lastGasSample = Date.now();
+      try {
+        const g = await readGas();
+        if (!g.subsidy.l1DataFreeNow) {
+          const e = g.subsidy.evidence;
+          console.log(
+            `[watch] L1 calldata charged: ${g.perL1CalldataUnit} wei ` +
+              `(${e.nonZeroSamples}/${e.samples} samples non-zero)`,
+          );
+        }
+      } catch (err) {
+        console.error('[watch] gas sample failed:', (err as Error).message.slice(0, 100));
+      }
+    }
+
     await new Promise((r) => setTimeout(r, interval));
   }
 }
