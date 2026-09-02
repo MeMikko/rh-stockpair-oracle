@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "slug": "rh-stockpair-oracle",
   "provider": "RH stock-pair oracle",
-  "providerUrl": "https://github.com/REPLACE-ME/rh-stockpair-oracle",
+  "providerUrl": "https://github.com/MeMikko/rh-stockpair-oracle",
   "logo": "logo.svg",
   "demo": {
     "title": "quote.sh",

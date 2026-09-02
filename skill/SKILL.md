@@ -12,7 +12,7 @@ stock or ETF. Deterministic: no model sits in the data path, and every response
 carries the facts behind it.
 
 **Base URL:** `https://REPLACE-ME.example.com`
-**Source:** `https://github.com/REPLACE-ME/rh-stockpair-oracle`
+**Source:** `https://github.com/MeMikko/rh-stockpair-oracle`
 
 **Pricing.** This is not a free service. It is currently in **launch mode**:
 every route is served without charge and no key is required, while each

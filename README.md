@@ -299,8 +299,8 @@ approval queue, and sending still needs a person to approve one and run
 `skill/` is the package for a PR to
 [BankrBot/skills](https://github.com/BankrBot/skills) — `SKILL.md`,
 `catalog.json`, `logo.svg`, `README.md` in the layout that repo uses. It has
-two `REPLACE-ME` placeholders (the public base URL and the source repo) that
-have to be real before it is submitted.
+one `REPLACE-ME` placeholder left — the public base URL — which has to be a
+real deployed host before it is submitted.
 
 Never sends transactions and never holds funds.
 
