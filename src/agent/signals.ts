@@ -257,7 +257,7 @@ export async function detectProtocolSplit(): Promise<Signal[]> {
       fromBlock: rep.fromBlock,
       toBlock: rep.toBlock,
     },
-    reproduce: 'POST /ask {"question":"v3 v4 volume split"}',
+    reproduce: 'GET /volume',
     detectedAt: Date.now(),
   }];
 }

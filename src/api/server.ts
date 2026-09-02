@@ -9,6 +9,7 @@ import { registerLanding } from './routes/landing.js';
 import { registerWebhook } from './routes/webhook.js';
 import { registerAuth } from './routes/auth.js';
 import { registerPro } from './routes/pro.js';
+import { registerData } from './routes/data.js';
 import { registerX402 } from './x402.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { getDb } from '../db/index.js';
@@ -29,16 +30,21 @@ export function buildServer() {
     // Both protocols, and how far each index has actually walked. A health
     // check that reported only v4 would look green while a third of the
     // stock-paired volume went unindexed.
-    const cursors = Object.fromEntries(
-      (
-        db.prepare('SELECT stream, last_block FROM cursor').all() as unknown as Array<{
-          stream: string;
-          last_block: number;
-        }>
-      )
-        .filter((c) => !c.stream.startsWith('crosscheck:'))
-        .map((c) => [c.stream, Number(c.last_block)]),
-    );
+    const all = (
+      db.prepare('SELECT stream, last_block FROM cursor').all() as unknown as Array<{
+        stream: string;
+        last_block: number;
+      }>
+    ).filter((c) => !c.stream.startsWith('crosscheck:'));
+
+    // Two different things, reported separately. Pool discovery follows the
+    // tip continuously; the swap-window cursors are where a periodic volume
+    // measurement last looked, and are meaningless as a freshness signal for
+    // the index. An external test reasonably read a 12-hour-old swap cursor as
+    // a stale index -- because they were listed side by side as if they meant
+    // the same thing.
+    const pick = (p: (s: string) => boolean) =>
+      Object.fromEntries(all.filter((c) => p(c.stream)).map((c) => [c.stream, Number(c.last_block)]));
     return {
       ok: true,
       chainId: 4663,
@@ -50,7 +56,14 @@ export function buildServer() {
         pools: n('SELECT COUNT(*) AS n FROM pools_v3'),
         stockPaired: n("SELECT COUNT(*) AS n FROM pools_v3 WHERE quote_kind = 'stock'"),
       },
-      cursors,
+      // How far pool discovery has walked. This is index freshness.
+      cursors: pick((s) => !s.includes(':swaps:')),
+      volume: {
+        // Where the last volume measurement looked, not where the index is.
+        // GET /volume reports the window and its age directly.
+        lastMeasuredCursors: pick((s) => s.includes(':swaps:')),
+        note: 'a rolling 24h measurement refreshed every 6h; see GET /volume for its window',
+      },
     };
   });
 
@@ -67,5 +80,6 @@ export function buildServer() {
   registerWebhook(app);
   registerAuth(app);
   registerPro(app);
+  registerData(app);
   return app;
 }

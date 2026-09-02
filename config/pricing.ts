@@ -39,6 +39,11 @@ export const ROUTE_PRICES: Record<string, number> = {
   '/coverage': 0,
   '/corporate-actions': 0.005,
   '/ask': 0.005,
+  '/pools': 0.005,
+  '/volume': 0.005,
+
+  // Chain read: one Chainlink call per request.
+  '/price': 0.01,
 
   // Chain reads. Each costs upstream RPC.
   '/gas': 0.01,

@@ -7,6 +7,7 @@ import { feedFor } from '../registry/feeds.js';
 import { readFeed } from '../pricing/chainlink.js';
 import { marketStatus } from '../pricing/marketHours.js';
 import { verifyDraft } from '../agent/verify.js';
+import { REPRODUCE } from '../api/routes/data.js';
 import { aboutFacts, conversationalAnswer, conversationalConfig } from './conversational.js';
 import type { Tier } from '../entitlements/index.js';
 
@@ -103,14 +104,14 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
             `${intent.symbol} is $${read.priceUsd} per the Chainlink feed on Robinhood Chain, ` +
             `updated ${read.ageSeconds}s ago. The underlying market is ${market.session}` +
             `${market.isOpen ? '' : ', so on-chain pools can drift from this'}.`,
-          reproduce: 'GET /coverage',
+          reproduce: REPRODUCE.price(intent.symbol),
         };
       } catch {
         return {
           ...base,
           facts: { symbol: intent.symbol },
           text: `The Chainlink feed for ${intent.symbol} could not be read just now.`,
-          reproduce: 'GET /coverage',
+          reproduce: REPRODUCE.price(intent.symbol),
           answered: false,
         };
       }
@@ -124,7 +125,7 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
           ...base,
           facts: { symbol: intent.symbol, total: 0 },
           text: `No indexed pool on Robinhood Chain quotes ${intent.symbol}.`,
-          reproduce: 'GET /coverage',
+          reproduce: REPRODUCE.pools(intent.symbol),
         };
       }
       return {
@@ -133,7 +134,7 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
         text:
           `${c.total} indexed pools on Robinhood Chain quote ${intent.symbol} ` +
           `(${c.v4} on Uniswap v4, ${c.v3} on v3).`,
-        reproduce: `GET /corporate-actions?symbol=${intent.symbol}`,
+        reproduce: REPRODUCE.pools(intent.symbol),
       };
     }
 
@@ -243,10 +244,10 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
           `Over the last ${r1(rep.hours)}h, stock-paired volume on Robinhood Chain was ` +
           `$${r1(total / 1e6)}M: $${r1(v4 / 1e6)}M on Uniswap v4 and $${r1(v3 / 1e6)}M on v3 ` +
           `(${Math.round((v3 / total) * 100)}%).`,
-        // Reproducible by the caller, not by whoever runs the server. An
-        // answer that cites a command only the operator can run is not
-        // verifiable by the agent reading it.
-        reproduce: 'POST /ask {"question":"v3 v4 volume split"}',
+        // Was `POST /ask` with the same question -- circular, and flagged as
+        // such by an external test. A reproduce field has to name a different
+        // route that shows the same number independently.
+        reproduce: REPRODUCE.volume(),
       };
     }
 
