@@ -1,5 +1,8 @@
+import { tolerateClosedPipe } from '../src/util/stdout.js';
 import { listPosts } from '../src/agent/queue.js';
 import { loadSignal } from '../src/agent/signals.js';
+
+tolerateClosedPipe();
 
 const filter = process.argv.find(a => a.startsWith('--status='))?.split('=')[1];
 const posts = listPosts(filter as never);

@@ -1,7 +1,10 @@
+import { tolerateClosedPipe } from '../src/util/stdout.js';
 import { fetchCorporateActions, saveCorporateActions } from '../src/corporate/calendar.js';
 import { detectCorporateActions, detectCoverage, detectGasSubsidy, detectProtocolSplit, saveSignals, type Signal } from '../src/agent/signals.js';
 import { draftPost } from '../src/agent/draft.js';
 import { enqueue } from '../src/agent/queue.js';
+
+tolerateClosedPipe();
 
 const channels = (process.env.AGENT_CHANNELS ?? 'farcaster').split(',').map(s => s.trim()).filter(Boolean);
 

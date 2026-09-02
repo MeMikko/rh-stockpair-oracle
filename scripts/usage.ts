@@ -1,5 +1,8 @@
+import { tolerateClosedPipe } from '../src/util/stdout.js';
 import { getDb } from '../src/db/index.js';
 import { priceFor, pricingMode } from '../config/pricing.js';
+
+tolerateClosedPipe();
 
 /**
  * What the service is actually being asked for, and what that would be worth.

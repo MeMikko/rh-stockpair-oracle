@@ -1,7 +1,10 @@
+import { tolerateClosedPipe } from '../src/util/stdout.js';
 import {
   grant, revoke, listEntitlements, lookup, resolve,
   InvalidSubject, type SubjectType, type Tier,
 } from '../src/entitlements/index.js';
+
+tolerateClosedPipe();
 
 /**
  * Manage entitlements by hand.
