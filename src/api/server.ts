@@ -13,6 +13,7 @@ import { registerData } from './routes/data.js';
 import { registerX402 } from './x402.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { getDb } from '../db/index.js';
+import { getClient } from '../../config/chain.js';
 import { registerMetering } from './metering.js';
 
 export function buildServer() {
@@ -43,8 +44,34 @@ export function buildServer() {
     // the index. An external test reasonably read a 12-hour-old swap cursor as
     // a stale index -- because they were listed side by side as if they meant
     // the same thing.
-    const pick = (p: (s: string) => boolean) =>
-      Object.fromEntries(all.filter((c) => p(c.stream)).map((c) => [c.stream, Number(c.last_block)]));
+    // Measured, not assumed: chain 4663 runs near 0.1s per block, and the
+    // difference between that and one second is the difference between "1.4
+    // hours behind" and "14 hours behind".
+    const SECONDS_PER_BLOCK = 0.1;
+    let tip: number | null = null;
+    try {
+      tip = Number(await getClient().getBlockNumber());
+    } catch {
+      tip = null;
+    }
+
+    const lagged = (p: (s: string) => boolean) =>
+      Object.fromEntries(
+        all
+          .filter((c) => p(c.stream))
+          .map((c) => {
+            const block = Number(c.last_block);
+            const behind = tip === null ? null : Math.max(0, tip - block);
+            return [
+              c.stream,
+              {
+                block,
+                blocksBehind: behind,
+                secondsBehind: behind === null ? null : Math.round(behind * SECONDS_PER_BLOCK),
+              },
+            ];
+          }),
+      );
     return {
       ok: true,
       chainId: 4663,
@@ -56,12 +83,18 @@ export function buildServer() {
         pools: n('SELECT COUNT(*) AS n FROM pools_v3'),
         stockPaired: n("SELECT COUNT(*) AS n FROM pools_v3 WHERE quote_kind = 'stock'"),
       },
-      // How far pool discovery has walked. This is index freshness.
-      cursors: pick((s) => !s.includes(':swaps:')),
+      // Lag in seconds as well as blocks. An external test twice computed
+      // "12 hours behind" from a block delta by assuming one-second blocks;
+      // this chain runs at ~0.1s, so the real figure was a tenth of that.
+      // Publishing only block numbers invites that arithmetic, so the seconds
+      // are given directly.
+      tip,
+      secondsPerBlock: SECONDS_PER_BLOCK,
+      cursors: lagged((s) => !s.includes(':swaps:')),
       volume: {
         // Where the last volume measurement looked, not where the index is.
         // GET /volume reports the window and its age directly.
-        lastMeasuredCursors: pick((s) => s.includes(':swaps:')),
+        lastMeasuredCursors: lagged((s) => s.includes(':swaps:')),
         note: 'a rolling 24h measurement refreshed every 6h; see GET /volume for its window',
       },
     };
