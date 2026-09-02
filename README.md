@@ -361,6 +361,21 @@ page does not exist for the callers this service is built for.
 
 ## Pro, and paying per call
 
+**The 402 is x402-shaped but not x402-compatible, and says so.** In the
+published protocol, scheme `exact` means a signed EIP-3009 authorization in a
+PAYMENT-SIGNATURE header that a facilitator submits. Ours is an ordinary
+on-chain transfer whose hash is presented afterwards — same intent, different
+wire protocol. It was advertised as `exact`, which would have made a standard
+client (x402-fetch, `bankr x402 call`) sign an authorization we never read and
+loop on the retry. The scheme is now named `onchain-transfer-credit` and the
+body carries `standardX402: false`, so an incompatible client fails on the
+first call with a readable reason.
+
+Supporting real x402 means either verifying EIP-3009 signatures and settling
+through a facilitator, or publishing a thin handler on Bankr's x402 Cloud that
+proxies to this service. The second is the smaller job and also buys
+marketplace discovery; neither is done.
+
 Two surfaces, two shapes, because they are genuinely different problems.
 
 **Pro — $5.99 for 30 days, no auto-renewal.** Pay USDC on Base to the treasury

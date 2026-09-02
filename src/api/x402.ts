@@ -105,9 +105,20 @@ export function paymentRequirements(route: string) {
   const units = priceUnitsFor(route);
   return {
     x402Version: 1,
+    // NOT the x402 `exact` scheme, and deliberately not named as one.
+    //
+    // In the published protocol, `exact` means a signed EIP-3009
+    // authorization presented in a PAYMENT-SIGNATURE header, which a
+    // facilitator then submits. Ours is an ordinary on-chain transfer whose
+    // hash is presented afterwards. Same intent, different wire protocol.
+    //
+    // Advertising it as `exact` made a standard client (x402-fetch,
+    // `bankr x402 call`, an app's bankr.x402.fetch) sign an authorization we
+    // never read, get another 402, and loop. Naming the scheme honestly makes
+    // that a clean unsupported-scheme failure on the first try instead.
     accepts: [
       {
-        scheme: 'exact',
+        scheme: 'onchain-transfer-credit',
         network: 'base',
         chainId: PAYMENT_CHAIN_ID,
         asset: paymentConfig.usdc,
@@ -125,6 +136,11 @@ export function paymentRequirements(route: string) {
     // transfer buys credit that many calls draw down.
     settlement: {
       mode: 'prepaid-credit',
+      // Stated so a caller knows before trying, rather than after failing.
+      standardX402: false,
+      standardX402Note:
+        'A signed EIP-3009 authorization (PAYMENT-SIGNATURE) is not accepted yet. Pay ' +
+        'on-chain and present the transaction hash as described below.',
       howToPay:
         `Send USDC on Base to ${paymentConfig.treasury}, then retry with header ` +
         `${HEADER_PAYMENT}: <transaction hash>. The full amount becomes credit and ` +
