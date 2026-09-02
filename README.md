@@ -354,11 +354,21 @@ A pro subscriber can tag the agent on Farcaster and get an answer straight
 back, and sign in on the dashboard.
 
 Payment entitles an *address*, but autonomous replies check an *FID*, so
-`POST /pro/link-fid` links them — provably, not on request: Farcaster
-publishes the addresses an account has verified, and the signed-in address
-must be among them. The FID inherits the address's existing expiry, because
-issuing a second clock for one payment is how a subscription quietly becomes
-free.
+`POST /pro/link-fid` links them — and **the FID is taken on trust**. Requiring
+the payer to be an address the account has verified sounds stricter and is
+mostly friction: a Farcaster account's verified wallet is often one people
+would have to export and import before they could pay with it.
+
+That is safe because of what is *not* trusted. A mention's FID still comes
+from Neynar, so nobody can impersonate an account; all a false claim can do is
+hand the service to someone else, and the payment is made either way. The one
+real cost is the shared daily reply budget, so an address holds **one FID at a
+time** — linking another replaces it — and an FID another subscription already
+holds is refused.
+
+Verification is still checked and recorded, best effort. It never blocks. The
+FID inherits the address's existing expiry, because a second clock for one
+payment is how a subscription quietly becomes free.
 
 **x402 — pay per call, no account.** An agent that found this in a catalogue
 calls, gets a 402 describing exactly what to pay and where, pays, and calls

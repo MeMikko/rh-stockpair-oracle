@@ -49,9 +49,12 @@ export function registerPro(app: FastifyInstance): void {
 
   /**
    * Link a Farcaster account, so a payment made with a wallet also works when
-   * the agent is tagged. Self-service because the link is provable: the FID
-   * must have verified the signed-in address, which neither side gets to
-   * simply assert.
+   * the agent is tagged.
+   *
+   * The FID is taken on trust. A mention's FID still comes from Neynar, so
+   * nobody can impersonate an account -- a false claim only hands the service
+   * to someone else, and the payment is made either way. One FID per paying
+   * address, so a single subscription cannot spread across accounts.
    */
   app.post('/pro/link-fid', async (req, reply) => {
     const session = readSession(tokenFrom(req as never));
@@ -71,7 +74,13 @@ export function registerPro(app: FastifyInstance): void {
       fid: res.fid,
       address: res.address,
       expiresAt: res.expiresAt ? new Date(res.expiresAt).toISOString() : null,
-      note: `Tag the agent on Farcaster from FID ${res.fid} and it will answer directly.`,
+      // Reported rather than enforced: knowing the address was verified is
+      // worth something if a dispute arises, and it cost nothing to check.
+      verified: res.verified,
+      replaced: res.replaced,
+      note:
+        `Tag the agent on Farcaster from FID ${res.fid} and it will answer directly.` +
+        (res.replaced ? ` This replaced FID ${res.replaced}.` : ''),
     };
   });
 

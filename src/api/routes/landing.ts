@@ -292,7 +292,7 @@ function clientScript(): string {
   $('linkfid').addEventListener('click', function () {
     var fid = $('fid').value.trim();
     if (!fid) { say('proout', 'Enter your Farcaster FID.', 'err'); return; }
-    say('proout', 'Checking that this FID has verified your address…');
+    say('proout', 'Linking…');
     fetch('/pro/link-fid', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ fid: fid })
@@ -300,7 +300,9 @@ function clientScript(): string {
       .then(function (r) { return r.json(); })
       .then(function (j) {
         say('proout', j.ok
-          ? 'FID ' + j.fid + ' linked. Tag the agent and it will answer directly.'
+          ? 'FID ' + j.fid + ' linked' + (j.verified ? ' (address verified on Farcaster)' : '') +
+            '. Tag the agent and it will answer directly.' +
+            (j.replaced ? ' Replaced FID ' + j.replaced + '.' : '')
           : (j.error || 'link failed'), j.ok ? '' : 'err');
       })
       .catch(function (e) { say('proout', e.message || 'link failed', 'err'); });
@@ -430,7 +432,8 @@ classify says so. There is no fallback that guesses.</p>
   <ol>
     <li>Send <b>${formatUsdc(priceUnits())} USDC</b> on Base to the treasury.</li>
     <li>Claim — the server verifies the transfer on-chain.</li>
-    <li>Link your Farcaster FID to use it when you tag the agent.</li>
+    <li>Link your Farcaster FID to use it when you tag the agent. One FID at a
+    time — linking another replaces it.</li>
   </ol>
   <div class="addr">${esc(paymentConfig.treasury)}</div>
   <div class="askrow" style="margin-top:14px">
