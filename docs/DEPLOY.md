@@ -119,12 +119,40 @@ ALCHEMY_API_KEY=...            # state and archive reads
 Farcaster credentials are only needed to *publish*. Leave them empty and the
 agent still scans, drafts and queues — it simply cannot send.
 
-## First run
+## Installing
+
+Two ways in. **Cloning on the server is the simpler one** and needs no SSH
+access from your workstation at all — the repository is public, so the server
+pulls it directly. Use this if you administer the box from a console.
+
+```bash
+# on the server, as root
+apt update && apt install -y git
+
+# clone straight to the target path; without one, git would create
+# ./rh-stockpair-oracle in whatever directory you happen to be in
+git clone https://github.com/MeMikko/rh-stockpair-oracle /opt/rh-oracle
+cd /opt/rh-oracle
+
+# survey before changing anything on a box that already serves something
+bash ops/preflight.sh
+```
+
+Updates are then `git -C /opt/rh-oracle pull` followed by a service restart.
+Note that `.env` and `data/` are gitignored, so a pull can never overwrite the
+credentials or the index.
+
+The alternative pushes from a workstation that has SSH access:
 
 ```bash
 ./ops/deploy.sh oracle@<server-ip>
+```
 
-# then, on the server, seed the index once (about 20 minutes total)
+## First run
+
+```bash
+
+# on the server, seed the index once (about 20 minutes total)
 sudo -u oracle -i
 cd /opt/rh-oracle
 npm run registry:sync
