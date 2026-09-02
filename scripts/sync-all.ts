@@ -21,19 +21,29 @@ let failed = 0;
 for (const [name, script, args] of steps) {
   if (only && only !== name) continue;
   const started = Date.now();
-  process.stdout.write(`[sync] ${name} ... `);
+  console.log(`[sync] ${name} starting`);
   try {
+    // Inherit stdio rather than capture it. The volume step runs for an hour
+    // and its progress output is the only sign it is alive; buffering that
+    // until the child exits makes a working sync indistinguishable from a
+    // hung one -- which is exactly how it looked the first time this ran
+    // under systemd. journald captures the child's own output, so nothing is
+    // lost by not reading it here, and a crash explains itself in place.
     execFileSync(process.execPath, ['--env-file-if-exists=.env', '--import', 'tsx', script, ...args], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: 'inherit',
       timeout: 3 * 60 * 60 * 1000,
     });
-    console.log(`ok (${((Date.now() - started) / 1000).toFixed(0)}s)`);
+    console.log(`[sync] ${name} ok (${((Date.now() - started) / 1000).toFixed(0)}s)`);
   } catch (err) {
     failed++;
-    const e = err as { stderr?: Buffer; message?: string };
-    console.log(
-      `FAILED (${((Date.now() - started) / 1000).toFixed(0)}s): ` +
-        `${(e.stderr?.toString() || e.message || '').split('\n').slice(-3).join(' ').slice(0, 300)}`,
+    // Only the exit status is reported, because that is all this wrapper
+    // knows. Taking the tail of captured stderr looked informative and was
+    // not: for a Node crash those lines are the version banner, so a failing
+    // step reported "FAILED: Node.js v22.22.1" and nothing about the cause.
+    const e = err as { status?: number; signal?: string };
+    console.error(
+      `[sync] ${name} FAILED (${((Date.now() - started) / 1000).toFixed(0)}s) ` +
+        `exit=${e.status ?? '?'}${e.signal ? ` signal=${e.signal}` : ''} — its own error output is above.`,
     );
   }
 }
