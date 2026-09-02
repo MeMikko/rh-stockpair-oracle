@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { answerQuestion } from '../../answer/answer.js';
-import { ANONYMOUS } from '../../entitlements/index.js';
+import { tierForSession } from '../../auth/session.js';
+import { tokenFrom } from './auth.js';
 
 /**
  * POST /ask -- the conversational surface, for other agents.
@@ -37,11 +38,13 @@ export function registerAsk(app: FastifyInstance): void {
       symbol: a.intent.symbol,
       facts: a.facts,
       reproduce: a.reproduce,
-      // Reported so a caller can see what it is being treated as. There is no
-      // way to authenticate over HTTP yet, so this is always the anonymous
-      // resolution -- stated rather than omitted, because a field that
-      // silently means "free" is how a caller ends up assuming otherwise.
-      caller: { tier: ANONYMOUS.tier, reason: ANONYMOUS.reason },
+      // Resolved from the session when there is one. A caller without a
+      // signature stays free whatever it claims to be -- that refusal is the
+      // property the entitlements module exists to hold.
+      caller: (() => {
+        const t = tierForSession(tokenFrom(req as never));
+        return { tier: t.tier, address: t.subject, reason: t.reason };
+      })(),
     };
   });
 

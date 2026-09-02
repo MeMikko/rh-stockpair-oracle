@@ -240,3 +240,15 @@ CREATE TABLE IF NOT EXISTS auto_replies (
 );
 CREATE INDEX IF NOT EXISTS auto_replies_fid_time ON auto_replies(fid, replied_at);
 CREATE INDEX IF NOT EXISTS auto_replies_time ON auto_replies(replied_at);
+
+-- Single-use nonces for wallet sign-in.
+--
+-- Single-use is the whole point: without it a captured signature could be
+-- replayed forever by anyone who saw it once. Rows are pruned opportunistically
+-- on use, since nothing else would ever read them again.
+CREATE TABLE IF NOT EXISTS auth_nonces (
+  nonce     TEXT PRIMARY KEY,
+  issued_at INTEGER NOT NULL,
+  used      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS auth_nonces_age ON auth_nonces(issued_at);
