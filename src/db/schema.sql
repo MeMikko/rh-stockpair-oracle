@@ -252,3 +252,20 @@ CREATE TABLE IF NOT EXISTS auth_nonces (
   used      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS auth_nonces_age ON auth_nonces(issued_at);
+
+-- Payments that bought an entitlement.
+--
+-- The primary key is the transaction hash, which is what makes a claim
+-- idempotent: one transfer can only ever buy one period, no matter how many
+-- times it is submitted. Written in the same database transaction as the
+-- entitlement it grants, so a crash cannot leave money spent with nothing
+-- granted, or an entitlement with no payment behind it.
+CREATE TABLE IF NOT EXISTS payments (
+  tx_hash    TEXT PRIMARY KEY,
+  chain_id   INTEGER NOT NULL,
+  payer      TEXT NOT NULL,
+  amount     TEXT NOT NULL,      -- base units, as a string
+  claimed_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS payments_payer ON payments(payer);

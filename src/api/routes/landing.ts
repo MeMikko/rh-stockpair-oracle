@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { getDb } from '../../db/index.js';
 import { ROUTE_PRICES, pricingMode } from '../../../config/pricing.js';
+import { formatUsdc, paymentConfig, priceUnits, PAYMENT_CHAIN_ID } from '../../../config/payments.js';
 
 /**
  * The page a human gets at the root.
@@ -140,6 +141,19 @@ footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:v
 .ans pre{margin:8px 0 0}
 .unans{border-left:2px solid var(--dim)}
 .err{border-left:2px solid #c0392b}
+.pro{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin:14px 0 0}
+.pro h3{margin:0 0 6px;font-size:.95rem}
+.pro ol{margin:12px 0 0;padding-left:20px;color:var(--dim);font-size:.88rem}
+.pro li{margin:6px 0}
+.pro .addr{font-family:var(--mono);font-size:.8rem;word-break:break-all;
+  background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 9px;margin:4px 0 0}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 0}
+.btns button{padding:9px 15px;font:inherit;font-size:.88rem;font-weight:500;cursor:pointer;
+  border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.btns button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+.btns button[disabled]{opacity:.5;cursor:default}
+.who{font-size:.82rem;color:var(--dim);margin-top:10px}
+.who b{color:var(--fg);font-weight:600}
 </style></head><body><div class="wrap">
 
 <h1>RH stock-pair oracle</h1>
@@ -195,6 +209,33 @@ does know. There is no fallback that guesses.</p>
 <pre><code>curl -X POST https://oracle.sb4s.xyz/ask \\
   -H 'content-type: application/json' \\
   -d '{"question":"when is the next NVDA dividend?"}'</code></pre>
+
+<h2>Pro</h2>
+<div class="pro">
+  <h3>$${paymentConfig.priceUsd} for ${paymentConfig.periodDays} days — does not auto-renew</h3>
+  <p style="margin:0;color:var(--dim);font-size:.9rem">
+    Pro lets you tag the agent on Farcaster and get an answer straight back, and
+    signs you in here. Pay from your own wallet; the server reads the transfer
+    off Base rather than trusting a receipt.
+  </p>
+  <div class="btns">
+    <button id="connect" class="primary">Connect wallet</button>
+    <button id="pay" disabled>Pay ${formatUsdc(priceUnits())} USDC</button>
+    <button id="signin" disabled>Sign in</button>
+  </div>
+  <div class="who" id="who">Not connected.</div>
+  <ol>
+    <li>Send <b>${formatUsdc(priceUnits())} USDC</b> on Base to the treasury below.</li>
+    <li>Paste the transaction hash — or let the button do both.</li>
+    <li>Sign a message to prove the address. It authorises nothing else.</li>
+  </ol>
+  <div class="addr">${esc(paymentConfig.treasury)}</div>
+  <div class="askrow" style="margin-top:10px">
+    <input id="txhash" type="text" placeholder="0x… transaction hash, if you paid separately">
+    <button type="button" id="claim">Claim</button>
+  </div>
+  <div id="proout"></div>
+</div>
 
 <h2>Endpoints</h2>
 <table>
@@ -285,6 +326,113 @@ Counts on this page are read live from the index at request time.
       })
       .then(function () { go.disabled = false; });
   }
+
+  // ---- pro: connect, pay, sign in ----------------------------------------
+  // No wallet library: window.ethereum is all this needs, and a bundled
+  // connector would be the only third-party script on the page.
+  var TREASURY = ${JSON.stringify(paymentConfig.treasury)};
+  var USDC = ${JSON.stringify(paymentConfig.usdc)};
+  var AMOUNT = ${JSON.stringify(priceUnits().toString())};
+  var CHAIN_HEX = ${JSON.stringify('0x' + PAYMENT_CHAIN_ID.toString(16))};
+
+  var account = null;
+  var $ = function (id) { return document.getElementById(id); };
+  var proout = $('proout');
+
+  function say(msg, cls) {
+    proout.innerHTML = '<div class="ans ' + (cls || '') + '"><p>' + esc(msg) + '</p></div>';
+  }
+
+  function refreshWho() {
+    fetch('/auth/me').then(function (r) { return r.json(); }).then(function (me) {
+      var bits = [];
+      if (account) bits.push('wallet <b>' + esc(account.slice(0, 6) + '…' + account.slice(-4)) + '</b>');
+      bits.push(me.signedIn ? 'signed in as <b>' + esc(me.tier) + '</b>' : 'not signed in');
+      $('who').innerHTML = bits.join(' · ');
+      $('pay').disabled = !account;
+      $('signin').disabled = !account;
+    }).catch(function () {});
+  }
+
+  // 6-decimal USDC amount as a 32-byte hex word, without a bignum library.
+  function encodeTransfer(to, amount) {
+    var addr = to.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+    var amt = BigInt(amount).toString(16).padStart(64, '0');
+    return '0xa9059cbb' + addr + amt;
+  }
+
+  $('connect').addEventListener('click', function () {
+    if (!window.ethereum) { say('No wallet found in this browser.', 'err'); return; }
+    window.ethereum.request({ method: 'eth_requestAccounts' })
+      .then(function (accs) { account = accs[0]; refreshWho(); say('Wallet connected.'); })
+      .catch(function (e) { say(e.message || 'connection refused', 'err'); });
+  });
+
+  $('pay').addEventListener('click', function () {
+    if (!account) return;
+    say('Switching to Base…');
+    window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_HEX }] })
+      .catch(function () { /* already on Base, or the wallet refused; try anyway */ })
+      .then(function () {
+        say('Confirm the transfer in your wallet…');
+        return window.ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{ from: account, to: USDC, data: encodeTransfer(TREASURY, AMOUNT) }]
+        });
+      })
+      .then(function (tx) {
+        $('txhash').value = tx;
+        // Claiming immediately usually fails on confirmations, which is
+        // expected rather than an error; the hash is kept so Claim works once
+        // the transfer settles.
+        say('Sent ' + tx.slice(0, 12) + '… — wait a few seconds, then press Claim.');
+      })
+      .catch(function (e) { say(e.message || 'payment cancelled', 'err'); });
+  });
+
+  $('claim').addEventListener('click', function () {
+    var tx = $('txhash').value.trim();
+    if (!tx) { say('Paste the transaction hash first.', 'err'); return; }
+    say('Checking the transfer on Base…');
+    fetch('/pro/claim', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ txHash: tx })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j.ok) { say(j.error || 'claim failed', 'err'); return; }
+        say('Pro until ' + j.expiresAt.slice(0, 10) + ' for ' + j.address.slice(0, 10) + '… — now sign in with that wallet.');
+        refreshWho();
+      })
+      .catch(function (e) { say(e.message || 'claim failed', 'err'); });
+  });
+
+  $('signin').addEventListener('click', function () {
+    if (!account) return;
+    say('Requesting a nonce…');
+    fetch('/auth/nonce?address=' + encodeURIComponent(account))
+      .then(function (r) { return r.json(); })
+      .then(function (n) {
+        if (!n.message) throw new Error('sign-in is not configured on this server');
+        return window.ethereum
+          .request({ method: 'personal_sign', params: [n.message, account] })
+          .then(function (sig) {
+            return fetch('/auth/verify', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ address: account, signature: sig, nonce: n.nonce })
+            });
+          });
+      })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.j.error || 'sign-in failed');
+        say('Signed in as ' + res.j.tier + '.');
+        refreshWho();
+      })
+      .catch(function (e) { say(e.message || 'sign-in failed', 'err'); });
+  });
+
+  refreshWho();
 
   form.addEventListener('submit', function (e) { e.preventDefault(); ask(input.value.trim()); });
   document.getElementById('chips').addEventListener('click', function (e) {

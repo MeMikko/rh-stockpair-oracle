@@ -8,6 +8,7 @@ import { registerAsk } from './routes/ask.js';
 import { registerLanding } from './routes/landing.js';
 import { registerWebhook } from './routes/webhook.js';
 import { registerAuth } from './routes/auth.js';
+import { registerPro } from './routes/pro.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { getDb } from '../db/index.js';
 import { registerMetering } from './metering.js';
@@ -61,5 +62,6 @@ export function buildServer() {
   registerLanding(app);
   registerWebhook(app);
   registerAuth(app);
+  registerPro(app);
   return app;
 }
