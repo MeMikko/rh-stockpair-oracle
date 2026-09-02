@@ -30,7 +30,8 @@ export function registerAsk(app: FastifyInstance): void {
       return reply.code(400).send({ error: 'question too long (max 500 chars)' });
     }
 
-    const a = await answerQuestion(question);
+    const caller = tierForSession(tokenFrom(req as never));
+    const a = await answerQuestion(question, new Date(), { tier: caller.tier });
     return {
       answered: a.answered,
       answer: a.text,
@@ -41,10 +42,7 @@ export function registerAsk(app: FastifyInstance): void {
       // Resolved from the session when there is one. A caller without a
       // signature stays free whatever it claims to be -- that refusal is the
       // property the entitlements module exists to hold.
-      caller: (() => {
-        const t = tierForSession(tokenFrom(req as never));
-        return { tier: t.tier, address: t.subject, reason: t.reason };
-      })(),
+      caller: { tier: caller.tier, address: caller.subject, reason: caller.reason },
     };
   });
 

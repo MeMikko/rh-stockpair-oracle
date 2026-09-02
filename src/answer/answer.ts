@@ -4,6 +4,8 @@ import { computeCoverage } from '../registry/coverage.js';
 import { upcomingActions } from '../corporate/calendar.js';
 import { readGas } from '../pricing/gas.js';
 import { verifyDraft } from '../agent/verify.js';
+import { aboutFacts, conversationalAnswer, conversationalConfig } from './conversational.js';
+import type { Tier } from '../entitlements/index.js';
 
 /**
  * Deterministic answers to questions about the indexed data.
@@ -220,7 +222,11 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
  * function. A template that drifts into citing a number it did not put in
  * `facts` fails here rather than in front of an audience.
  */
-export async function answerQuestion(question: string, now = new Date()): Promise<Answer> {
+export async function answerQuestion(
+  question: string,
+  now = new Date(),
+  opts: { tier?: Tier } = {},
+): Promise<Answer> {
   const answer = await build(classify(question), now);
   const v = verifyDraft(answer.text, answer.facts);
   if (!v.ok && answer.answered) {
@@ -232,5 +238,32 @@ export async function answerQuestion(question: string, now = new Date()): Promis
     );
     return { ...answer, text: NO_IDEA, answered: false };
   }
+  // Only where the deterministic path gave up. A question it can route keeps
+  // its template answer -- putting a model in front of a working lookup adds
+  // a failure mode and buys nothing.
+  if (!answer.answered) {
+    const allowed =
+      conversationalConfig.mode === 'all' ||
+      (conversationalConfig.mode === 'pro' && opts.tier === 'pro');
+    if (allowed) {
+      const c = await conversationalAnswer(question, answer.text);
+      if (c.usedModel) {
+        return {
+          ...answer,
+          text: c.text,
+          facts: aboutFacts(),
+          reproduce: 'GET /health',
+          // Still false: nothing was looked up. The reply explains the
+          // service rather than answering a data question, and a caller
+          // should not treat it as a measurement.
+          answered: false,
+        };
+      }
+      if (c.rejected) {
+        console.error(`[answer] conversational reply rejected: ${c.rejected.join(', ')}`);
+      }
+    }
+  }
+
   return answer;
 }

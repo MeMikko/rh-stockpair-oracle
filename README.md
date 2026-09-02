@@ -370,6 +370,30 @@ rather than only here.
 Off while `PRICING_MODE=launch` — every route is served and the 402 never
 fires, while the price headers say what it will cost.
 
+### A model on the fallback path only
+
+`ASK_LLM_MODE` lets a model answer the questions the classifier **could not
+route** — "introduce yourself", "what can you do". Every question it *can*
+route keeps its template answer: putting a model in front of a working lookup
+adds a failure mode and buys nothing.
+
+Two existing mechanisms make that safe rather than merely hopeful. `verifyDraft`
+still runs, so the reply may only contain numbers present in a fixed, curated
+fact set — it cannot invent a pool count or state a price, and a reply that
+tries is discarded. And the model is handed that snapshot rather than the
+index, so there is no path from a question to arbitrary data.
+
+Prompt injection is therefore *bounded*, not prevented: nothing in a question
+can make it state a false figure, because a false figure fails verification.
+It could still be talked into an odd sentence, which is why it starts at
+`pro` rather than `all`.
+
+It also changes the cost shape, and that is the real trade: with a model on
+this path, LLM spend starts scaling with traffic instead of with post volume.
+At $0.00129 a call, ten thousand unroutable questions a month is about $13 —
+fine, but no longer free, and worth watching in `npm run usage` before opening
+it to everyone.
+
 ### What the prices have to cover
 
 Measured, not guessed. The LLM is the only per-unit cost and it is small:
