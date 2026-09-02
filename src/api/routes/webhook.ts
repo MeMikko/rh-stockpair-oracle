@@ -160,9 +160,14 @@ export function registerWebhook(app: FastifyInstance): void {
     const a = await answerQuestion(questionFromCast(mention.text), new Date(), { tier });
     const verification = verifyDraft(a.text, signal.facts);
     if (!verification.ok) {
-      req.log.error(
-        `answer for @${mention.author} failed verification: ${verification.unsupported.join(', ')}`,
-      );
+      // Two different failures, reported as two different things. An
+      // unsupported number is a claim we will not make; an over-long reply is
+      // one that will not fit a cast. Reporting either as a bare "failed
+      // verification" with an empty list is how this hid twice.
+      const why = verification.unsupported.length
+        ? `unsupported numbers: ${verification.unsupported.join(', ')}`
+        : `too long for a cast: ${verification.length} chars`;
+      req.log.error(`answer for @${mention.author} failed verification — ${why}`);
       return { ok: true, ignored: 'failed verification' };
     }
 

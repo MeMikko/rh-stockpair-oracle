@@ -89,25 +89,33 @@ describe('conversational fallback', () => {
   });
 
   /**
-   * verifyDraft's `ok` also enforces the 280-character cast limit, which is
-   * the right rule for a post and the wrong one for a reply on a web page.
-   * Reusing it rejected every well-behaved answer on length while reporting no
-   * unsupported numbers at all — so the log said a reply had been discarded
-   * and could not say why.
+   * One limit everywhere, matching MAX_POST_LENGTH.
+   *
+   * This module briefly allowed 480 characters while the reply paths still
+   * verified against the 280-character cast limit, so a long answer passed
+   * here and was then discarded downstream with an empty reason. A reply that
+   * cannot fit a cast is not a reply, so it is refused at the source.
    */
-  it('accepts a reply longer than a cast but within its own limit', async () => {
+  it('refuses a reply that would not fit a cast', async () => {
     const long =
       'I index tokenized stock pools on Robinhood Chain and answer questions about pool ' +
       'counts, upcoming corporate actions, Chainlink feed coverage, gas, and the split ' +
       'between the two Uniswap versions deployed here. Ask about a ticker and I will tell ' +
       'you what the index holds for it, along with the call that reproduces the answer.';
-    // Comfortably past a cast's limit, comfortably inside this module's own.
     expect(long.length).toBeGreaterThan(280);
-    expect(long.length).toBeLessThan(480);
     vi.stubGlobal('fetch', async () => reply(long));
     const r = await conversationalAnswer('introduce yourself', FALLBACK);
-    expect(r.usedModel).toBe(true);
-    expect(r.text).toBe(long);
+    expect(r.usedModel).toBe(false);
+    expect(r.rejected).toContain('too long');
+  });
+
+  it('accepts a reply that fits', async () => {
+    const fits =
+      'I am Vates. I index tokenized stock pools on Robinhood Chain and answer questions ' +
+      'about them, always with the call that reproduces the answer.';
+    expect(fits.length).toBeLessThan(280);
+    vi.stubGlobal('fetch', async () => reply(fits));
+    expect((await conversationalAnswer('introduce yourself', FALLBACK)).usedModel).toBe(true);
   });
 
   it('falls back rather than truncating an over-long reply', async () => {

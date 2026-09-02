@@ -101,11 +101,13 @@ async function pass(): Promise<number> {
     if (!verification.ok) {
       // A template failing verification is a bug, not a rejection, so it is
       // loud -- and it blocks the autonomous path exactly as firmly as the
-      // queued one. Nothing unverified is sent, approved or not.
-      console.error(
-        `SKIP  @${m.author}: answer failed verification ` +
-          `(unsupported: ${verification.unsupported.join(', ') || 'none'})`,
-      );
+      // queued one. Nothing unverified is sent, approved or not. The two
+      // failures are named separately: an unsupported number is a claim we
+      // will not make, an over-long reply simply will not fit a cast.
+      const why = verification.unsupported.length
+        ? `unsupported numbers: ${verification.unsupported.join(', ')}`
+        : `too long for a cast: ${verification.length} chars`;
+      console.error(`SKIP  @${m.author}: answer failed verification — ${why}`);
       continue;
     }
 
