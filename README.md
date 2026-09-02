@@ -220,6 +220,27 @@ stock split. Tickers match only as whole uppercase words, because `ON` and `PR`
 are real tickers here and case-insensitive matching turns most English into a
 lookup.
 
+### Hearing a mention
+
+Neynar delivers mentions by **webhook**, which is what `POST
+/webhooks/farcaster` is for. Point a `cast.created` filter with
+`mentioned_fids` set to the agent's FID at
+`https://oracle.sb4s.xyz/webhooks/farcaster` in the Neynar dashboard, and set
+the shared secret as `NEYNAR_WEBHOOK_SECRET`.
+
+**The signature check on that endpoint is a security boundary, not a
+formality.** The entitlement deciding whether a mention is answered
+autonomously hangs on `data.author.fid`, which arrives inside the request
+body. Without verification, anyone could POST a forged `cast.created` naming
+an entitled FID and use the agent's voice on demand. So the raw bytes are
+HMAC-SHA512'd and compared in constant time, a bad signature is a 401, and an
+unset secret disables the endpoint rather than opening it.
+
+`npm run agent:listen` still exists and polls instead. It is kept as a
+fallback and marked as such: its response mapping was written from the API's
+general shape rather than a published spec, so it fails closed — a wrong field
+name yields no mentions rather than a mishandled one.
+
 ### Autonomous replies, and why replying is not posting
 
 By default every reply is queued for a person. With

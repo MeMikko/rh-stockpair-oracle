@@ -321,6 +321,7 @@ export function registerLanding(app: FastifyInstance): void {
       'Disallow: /gas',
       'Disallow: /ask',
       'Disallow: /corporate-actions',
+      'Disallow: /webhooks/',
       '',
     ].join('\n');
   });

@@ -1,0 +1,157 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { FastifyInstance } from 'fastify';
+import { answerQuestion } from '../../answer/answer.js';
+import { verifyDraft } from '../../agent/verify.js';
+import { enqueue } from '../../agent/queue.js';
+import { saveMentionSignal, signalForMention, type Mention } from '../../agent/mentions.js';
+import { decide, recordAutoReply, alreadyAutoReplied } from '../../agent/autonomy.js';
+import { farcaster } from '../../agent/publish/farcaster.js';
+
+/**
+ * Neynar webhook: someone mentioned the agent.
+ *
+ * This is Neynar's documented way to hear about mentions, and it replaces
+ * polling a notifications endpoint whose response shape was never verified
+ * against a spec. It is also real time, and costs no polling quota.
+ *
+ * **The signature check is the security boundary, not a formality.** The
+ * entitlement that decides whether a mention is answered autonomously hangs on
+ * `data.author.fid`, which arrives inside this request body. Without
+ * verification anyone could POST a forged `cast.created` naming an entitled
+ * FID and make the agent reply on demand — the exact "claimed vs verified"
+ * hole the entitlements module exists to keep shut. So an unsigned or
+ * badly-signed request is rejected, and a missing secret disables the endpoint
+ * outright rather than opening it.
+ */
+
+/** Header Neynar signs the raw request body with. */
+const SIGNATURE_HEADER = 'x-neynar-signature';
+
+export function webhookConfigured(): boolean {
+  return Boolean(process.env.NEYNAR_WEBHOOK_SECRET?.trim());
+}
+
+/**
+ * HMAC-SHA512 of the raw body, compared in constant time.
+ *
+ * The raw bytes matter: re-serialising the parsed JSON would produce a
+ * different string and a signature that never matches, which is the classic
+ * way this check ends up quietly disabled to "make it work".
+ */
+export function verifySignature(rawBody: string, signature: string | undefined): boolean {
+  const secret = process.env.NEYNAR_WEBHOOK_SECRET?.trim();
+  if (!secret || !signature) return false;
+  const expected = createHmac('sha512', secret).update(rawBody).digest('hex');
+  const a = Buffer.from(expected, 'utf8');
+  const b = Buffer.from(signature.trim(), 'utf8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+interface CastCreated {
+  type?: string;
+  data?: {
+    hash?: string;
+    text?: string;
+    timestamp?: string;
+    author?: { fid?: number | string; username?: string };
+  };
+}
+
+/** Webhook payload -> the same Mention shape the rest of the agent uses. */
+export function mentionFromWebhook(body: CastCreated): Mention | null {
+  const d = body.data;
+  if (body.type !== 'cast.created' || !d?.hash || !d.text) return null;
+  return {
+    hash: d.hash,
+    author: d.author?.username ?? 'unknown',
+    authorFid: d.author?.fid === undefined ? null : String(d.author.fid),
+    text: d.text,
+    timestamp: d.timestamp ? Date.parse(d.timestamp) : Date.now(),
+  };
+}
+
+export function registerWebhook(app: FastifyInstance): void {
+  // Keep the raw body: the signature covers the bytes Neynar sent, not a
+  // re-encoding of them.
+  app.addContentTypeParser(
+    'application/json',
+    { parseAs: 'string' },
+    (req, body, done) => {
+      (req as unknown as { rawBody: string }).rawBody = body as string;
+      try {
+        done(null, JSON.parse(body as string));
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
+
+  app.post('/webhooks/farcaster', async (req, reply) => {
+    if (!webhookConfigured()) {
+      // Fail closed. An endpoint that accepts unsigned mention events is a
+      // remote trigger for the agent's voice.
+      return reply.code(503).send({ error: 'webhook not configured' });
+    }
+
+    const raw = (req as unknown as { rawBody?: string }).rawBody ?? '';
+    const sig = req.headers[SIGNATURE_HEADER];
+    if (!verifySignature(raw, Array.isArray(sig) ? sig[0] : sig)) {
+      req.log.warn('rejected webhook with a bad or missing signature');
+      return reply.code(401).send({ error: 'bad signature' });
+    }
+
+    const mention = mentionFromWebhook(req.body as CastCreated);
+    // Neynar retries until it gets a 200, so anything we deliberately ignore
+    // still has to be acknowledged or it is redelivered forever.
+    if (!mention) return { ok: true, ignored: 'not a cast.created mention' };
+    if (alreadyAutoReplied(mention.hash)) return { ok: true, ignored: 'already answered' };
+
+    const { signal, answered } = await signalForMention(mention);
+    const verdict = decide({ fid: mention.authorFid, answered });
+
+    if (!answered) {
+      req.log.info(`mention from @${mention.author}: ${verdict.reason}`);
+      return { ok: true, ignored: 'not answerable' };
+    }
+
+    const a = await answerQuestion(mention.text);
+    const verification = verifyDraft(a.text, signal.facts);
+    if (!verification.ok) {
+      req.log.error(
+        `answer for @${mention.author} failed verification: ${verification.unsupported.join(', ')}`,
+      );
+      return { ok: true, ignored: 'failed verification' };
+    }
+
+    if (verdict.autonomous) {
+      const res = await farcaster.publish(a.text, false, mention.hash);
+      if (res.error) {
+        req.log.error(`reply to @${mention.author} failed: ${res.error}`);
+        // Still a 200: Neynar retrying the delivery will not fix a Neynar
+        // publish error, and the idempotency key makes a later retry safe.
+        return { ok: true, ignored: 'send failed' };
+      }
+      recordAutoReply({
+        castHash: mention.hash,
+        fid: mention.authorFid!,
+        intent: a.intent.kind,
+        ref: res.ref,
+      });
+      req.log.info(`replied to @${mention.author} [${a.intent.kind}] ${res.ref}`);
+      return { ok: true, replied: true, ref: res.ref };
+    }
+
+    saveMentionSignal(signal);
+    const channels = (process.env.AGENT_CHANNELS ?? 'farcaster')
+      .split(',').map((s) => s.trim()).filter(Boolean);
+    const post = enqueue(
+      signal.id,
+      { text: a.text, draftedBy: 'answer', verification },
+      channels,
+      mention.hash,
+    );
+    req.log.info(`queued reply to @${mention.author}: ${verdict.reason}`);
+    return { ok: true, queued: post?.id ?? 'already queued' };
+  });
+}

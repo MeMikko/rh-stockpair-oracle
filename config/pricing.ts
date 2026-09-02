@@ -27,6 +27,12 @@ export const pricingMode: PricingMode =
  * an index read touches only local SQLite, a chain read costs an RPC round
  * trip, and a quoter simulation costs several.
  */
+/**
+ * Priced routes. Anything absent from this map is unpriced *and* unmetered --
+ * which is why /webhooks/farcaster is deliberately not here. It is inbound
+ * from Neynar rather than a call anyone makes, and counting it would put the
+ * webhook in the usage figures the pricing decision is meant to read.
+ */
 export const ROUTE_PRICES: Record<string, number> = {
   // Index reads. Local, cheap to serve.
   '/health': 0,
