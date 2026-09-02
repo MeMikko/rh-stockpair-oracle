@@ -9,14 +9,22 @@ Type=simple
 User=oracle
 Group=oracle
 WorkingDirectory=/opt/rh-oracle
+# Defaults first, then the operator's file, because systemd applies these in
+# the order they appear and the last one wins. With EnvironmentFile last, .env
+# can override; with it first, these would silently win and HOST would be
+# unconfigurable despite the docs saying otherwise.
+#
+# The default binds loopback: a reverse proxy on the host reaches it and the
+# internet never does. A containerised proxy cannot -- 127.0.0.1 inside a
+# container is the container -- so set HOST in .env to the gateway of that
+# container's Docker network.
+Environment=PORT=8080
+Environment=HOST=127.0.0.1
 EnvironmentFile=/opt/rh-oracle/.env
+
 ExecStart=/usr/bin/node --env-file-if-exists=/opt/rh-oracle/.env --import tsx scripts/serve.ts
 Restart=always
 RestartSec=5
-
-# Bound to loopback; Caddy terminates TLS and is the only thing that reaches it.
-Environment=PORT=8080
-Environment=HOST=127.0.0.1
 
 # The service reads chain data and writes one SQLite file. Nothing else.
 # Shared box: keep this service from starving whatever else runs here.
