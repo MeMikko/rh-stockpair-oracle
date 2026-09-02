@@ -55,6 +55,12 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
 const PROTOCOL_SPLIT_MIN_SHARE = 0.1;
 
 /**
+ * Retained gas samples required before the agent will say anything about the
+ * subsidy at all. Paired with a majority test in detectGasSubsidy.
+ */
+const GAS_SUBSIDY_MIN_SAMPLES = 30;
+
+/**
  * Corporate action approaching on a stock that prices indexed pools.
  *
  * This is the signal nobody else can produce: the calendar is public and the
@@ -211,10 +217,23 @@ export async function detectProtocolSplit(): Promise<Signal[]> {
 export async function detectGasSubsidy(): Promise<Signal[]> {
   const g = await readGas();
   const e = g.subsidy.evidence;
-  if (e.samples < 10) return []; // not enough evidence to say anything yet
-  if (e.freeAcrossWindow) return [];
+
+  // Two conditions, both required, because "the subsidy has ended" is the
+  // single claim here that would be most embarrassing to get wrong and is not
+  // retractable once posted.
+  //
+  // A minimum sample count stops the agent speaking from a thin window, and a
+  // majority stops it speaking from a blip. Both are needed: the reading is
+  // known to flap -- a non-zero observation during testing reverted to zero
+  // minutes later -- so any-sample-non-zero fires on noise. At 3 of 12 the
+  // detector was drafting "the launch gas subsidy appears to be ending" off
+  // exactly the kind of transient the /gas endpoint was built to survive.
+  if (e.samples < GAS_SUBSIDY_MIN_SAMPLES) return [];
+  if (e.nonZeroSamples * 2 <= e.samples) return [];
 
   return [{
+    // Keyed on the counts, so a changed balance of evidence is a new
+    // observation rather than a silent no-op against an existing post.
     id: signalId('gas_subsidy', `ended:${e.nonZeroSamples}/${e.samples}`),
     kind: 'gas_subsidy',
     severity: 'high',

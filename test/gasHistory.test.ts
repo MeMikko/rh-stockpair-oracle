@@ -46,3 +46,31 @@ describe('subsidyEvidence', () => {
     expect(subsidyEvidence(true).samples).toBe(1);
   });
 });
+
+/**
+ * The subsidy claim is the one this agent must never publish on noise: the L1
+ * reading flaps, and "the subsidy has ended" cannot be retracted once posted.
+ */
+describe('gas subsidy signal thresholds', () => {
+  const fires = (nonZeroSamples: number, samples: number) =>
+    samples >= 30 && nonZeroSamples * 2 > samples;
+
+  it('stays silent on a blip', () => {
+    expect(fires(3, 12)).toBe(false);
+    expect(fires(1, 40)).toBe(false);
+  });
+
+  it('stays silent on a thin window even when every sample is non-zero', () => {
+    expect(fires(12, 12)).toBe(false);
+    expect(fires(29, 29)).toBe(false);
+  });
+
+  it('stays silent on an exact half', () => {
+    expect(fires(20, 40)).toBe(false);
+  });
+
+  it('fires on a majority across a sufficient window', () => {
+    expect(fires(21, 40)).toBe(true);
+    expect(fires(30, 30)).toBe(true);
+  });
+});

@@ -44,8 +44,11 @@ export function templateDraft(signal: Signal): string {
              `Robinhood Chain: $${f.v3VolumeUsdMillions}M of $${f.totalVolumeUsdMillions}M ` +
              `over ${f.windowHours}h. An index that covers only v4 misses all of it.`;
     case 'gas_subsidy':
-      return `Robinhood Chain is charging for L1 data in ${f.nonZeroSamples} of the last ` +
-             `${f.samples} samples. The launch gas subsidy appears to be ending.`;
+      // "a majority of" rather than "appears to be ending": the detector only
+      // fires on a majority across at least 30 samples, and the wording should
+      // carry that evidence rather than outrun it.
+      return `Robinhood Chain is charging for L1 data in a majority of recent samples ` +
+             `(${f.nonZeroSamples} of ${f.samples}). The launch gas subsidy appears to be ending.`;
     default:
       return signal.summary;
   }
