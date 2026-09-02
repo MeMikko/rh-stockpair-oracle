@@ -1,0 +1,19 @@
+[Unit]
+Description=RH stock-pair oracle periodic sync (registry, calendar, holders, volume)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=oracle
+Group=oracle
+WorkingDirectory=/opt/rh-oracle
+EnvironmentFile=/opt/rh-oracle/.env
+ExecStart=/usr/bin/node --env-file-if-exists=/opt/rh-oracle/.env --import tsx scripts/sync-all.ts
+# The volume pass walks 24h of swap logs and takes about an hour.
+TimeoutStartSec=4h
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/rh-oracle/data

@@ -164,15 +164,26 @@ creation block and run to the tip.
 | **priced total** | **$409.5M** | 2,756 | — |
 | unpriceable (stock has no feed) | — | 2,942 | 1.76M |
 
-**This does not reconcile with Bankr's published $1.57M/day and must not be
-cited until it does.** Narrowed to the Bankr Doppler hook — the closest thing
-to Bankr's own denominator — we measure $87.1M/24h across 2,062 pools, still
-55× the published figure. Candidate explanations, none yet confirmed: the
-$1.57M figure dates from 2026-07-20 and the chain has grown since; Bankr may
-count a subset of its tokens, or exclude arbitrage; our figure counts every
-swap, and bot traffic dominates the swap counts. Reserve checks say the volume
-itself is physically plausible — the top v3 NVDA pool holds ~$6.1M and turns
-over 7×/day — so the gap is most likely definitional, not arithmetic.
+**This is a different denominator from Bankr's published $1.57M/day, and no
+claim here is stated relative to that figure.** The working explanation is
+that Bankr's number covers only tokens launched on its own platform, while
+ours covers stock-paired pools from every launchpad plus the equity venue
+pairs, which are the larger half.
+
+That explanation is not fully sufficient and the residual is recorded rather
+than waved away: narrowed to the Bankr Doppler hook — approximately
+"tokens launched on Bankr" — we still measure $87.1M/24h across 2,062 pools,
+55× the published figure. Three things could account for the rest, none
+confirmed: the $1.57M figure dates from 2026-07-20 and the chain has grown
+since; the Doppler hook is a protocol-level hook and may carry launches that
+are not Bankr's; and our figure counts every swap, where bot and arbitrage
+traffic dominates the swap counts.
+
+The volume itself is physically plausible — the top v3 NVDA pool holds ~$6.1M
+of reserves and turns over 7×/day — so the gap is definitional, not
+arithmetic. The `protocol_split` signal therefore publishes only the v3/v4
+split of our own measurement, which is reproducible from our own endpoint, and
+never a comparison against a third party's dashboard.
 
 ## Answering, not just posting
 
@@ -231,7 +242,26 @@ answer is skipped rather than answered with a shrug.
 - [ ] Reconcile the volume gap against Bankr's figure
 - [ ] Cross-check discovery against Blockscout (blocked: free tier allows ~10
       requests/window and the supplied key is not honoured by this instance)
-- [ ] Phase 4 — x402 Cloud deploy, skills-repo PR
+- [x] Phase 4 — deployment (`ops/`, `docs/DEPLOY.md`) and skill package (`skill/`)
+- [ ] Phase 4 — fill the two placeholders, deploy, open the skills-repo PR
+
+## Deploying
+
+`docs/DEPLOY.md` is the Hetzner runbook: systemd units in `ops/systemd`, a
+Caddyfile for TLS, and `ops/deploy.sh`. One CX22 is enough — the index is a
+SQLite file and the heavy job is the periodic volume walk, not the API.
+
+Two things are true of that box by construction. The API binds `127.0.0.1`, so
+Caddy is the only route in and port 8080 is never on the internet. And
+**nothing scheduled there can publish**: the agent timer writes drafts to the
+approval queue, and sending still needs a person to approve one and run
+`agent:publish -- --live` by hand.
+
+`skill/` is the package for a PR to
+[BankrBot/skills](https://github.com/BankrBot/skills) — `SKILL.md`,
+`catalog.json`, `logo.svg`, `README.md` in the layout that repo uses. It has
+two `REPLACE-ME` placeholders (the public base URL and the source repo) that
+have to be real before it is submitted.
 
 Never sends transactions and never holds funds.
 

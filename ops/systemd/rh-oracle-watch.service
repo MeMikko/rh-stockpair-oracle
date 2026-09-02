@@ -1,0 +1,23 @@
+[Unit]
+Description=RH stock-pair oracle tip follower (v4 + v3 pool discovery)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oracle
+Group=oracle
+WorkingDirectory=/opt/rh-oracle
+EnvironmentFile=/opt/rh-oracle/.env
+ExecStart=/usr/bin/node --env-file-if-exists=/opt/rh-oracle/.env --import tsx scripts/watch.ts
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/rh-oracle/data
+
+[Install]
+WantedBy=multi-user.target

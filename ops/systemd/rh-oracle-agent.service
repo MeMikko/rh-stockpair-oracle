@@ -1,0 +1,20 @@
+[Unit]
+Description=RH stock-pair oracle signal scan (queues drafts only, never publishes)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=oracle
+Group=oracle
+WorkingDirectory=/opt/rh-oracle
+EnvironmentFile=/opt/rh-oracle/.env
+# agent-scan writes drafts to the approval queue. Publishing needs a person to
+# approve and a separate --live invocation, so this is never scheduled.
+ExecStart=/usr/bin/node --env-file-if-exists=/opt/rh-oracle/.env --import tsx scripts/agent-scan.ts
+TimeoutStartSec=30min
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/rh-oracle/data

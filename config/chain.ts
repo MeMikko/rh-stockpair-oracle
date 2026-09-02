@@ -66,6 +66,13 @@ export const env = {
   logConcurrency: Number(process.env.RH_LOG_CONCURRENCY ?? (onPublic ? 8 : 4)),
   dbPath: process.env.DB_PATH ?? './data/oracle.db',
   port: Number(process.env.PORT ?? 8080),
+  /**
+   * Bind address. Defaults to all interfaces so local development and
+   * containers work without configuration; production sets 127.0.0.1 so the
+   * only route in is the TLS reverse proxy. On a host with a public IP the
+   * difference is whether port 8080 is on the internet.
+   */
+  host: process.env.HOST ?? '0.0.0.0',
 };
 
 /** Endpoint host, safe to log -- never includes the API key path segment. */

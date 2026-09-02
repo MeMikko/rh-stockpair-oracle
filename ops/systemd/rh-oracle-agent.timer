@@ -1,0 +1,10 @@
+[Unit]
+Description=Scan for publishable signals daily
+
+[Timer]
+OnCalendar=*-*-* 07:30:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

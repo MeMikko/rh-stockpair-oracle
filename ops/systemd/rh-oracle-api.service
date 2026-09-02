@@ -1,0 +1,33 @@
+[Unit]
+Description=RH stock-pair oracle API
+Documentation=https://github.com/MeMikko/rh-stockpair-oracle
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oracle
+Group=oracle
+WorkingDirectory=/opt/rh-oracle
+EnvironmentFile=/opt/rh-oracle/.env
+ExecStart=/usr/bin/node --env-file-if-exists=/opt/rh-oracle/.env --import tsx scripts/serve.ts
+Restart=always
+RestartSec=5
+
+# Bound to loopback; Caddy terminates TLS and is the only thing that reaches it.
+Environment=PORT=8080
+Environment=HOST=127.0.0.1
+
+# The service reads chain data and writes one SQLite file. Nothing else.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/rh-oracle/data
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

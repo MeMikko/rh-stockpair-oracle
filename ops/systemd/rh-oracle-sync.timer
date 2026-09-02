@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the oracle sync every 6 hours
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+# Volume measurement is heavy and the public RPC rate limits; spread the load
+# rather than hammering it on a predictable boundary.
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
