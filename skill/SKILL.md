@@ -43,20 +43,24 @@ market is shut.
 
 ## What is covered
 
-Both Uniswap deployments, from each contract's creation block to the tip:
+Both Uniswap deployments, from each contract's creation block to the tip.
+Pool counts measured 2026-09-03; volume is the rolling 24h window, refreshed
+every six hours (`GET /volume` carries its own `measuredSecondsAgo`):
 
 | | v4 | v3 |
 |---|---|---|
-| Pools indexed | 579,398 | 425,994 |
-| Stock-paired | 46,503 | 1,797 |
+| Pools indexed | 600,040 | 426,449 |
+| Stock-paired | 51,876 | 1,888 |
 | 24h volume | $286.8M | $160.5M |
 | Share | 64% | **36%** |
 
 The v3 half matters more than its pool count suggests. **Four of the five
-largest stock-paired pools by 24h volume are v3**, and the most-traded of all
-by swap count is a v3 NVDA/USDG pool (132,307 swaps). An index that covers
-only v4 misses more than a third of the subject — which is what every other RH
-data source does today.
+largest stock-paired pools by 24h volume are v3**, and NVDA's busiest pool is
+a v3 NVDA/USDG pool with 256,303 swaps in the measured window — ahead of all
+9,942 v4 NVDA pools. An index that covers only v4 misses more than a third of
+the subject, which is what every other RH data source does today.
+
+Every count here drifts: `GET /health` reports the live ones.
 
 Live figures, not a snapshot: `GET /volume` returns the current measurement
 with the window it was taken over, including `measuredSecondsAgo` — volume is
