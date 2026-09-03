@@ -16,8 +16,16 @@ import { computeCoverage } from '../registry/coverage.js';
 import { getDb } from '../db/index.js';
 import { getClient } from '../../config/chain.js';
 import { registerMetering } from './metering.js';
+import { assertLlmOnlyProcess } from '../../config/bankr.js';
 
 export function buildServer() {
+  // Before anything else. This process phrases answers through the Bankr LLM
+  // gateway, attaching its credential to a request whose body carries text a
+  // stranger wrote. A key that could also sign, transfer or launch has no
+  // business being in that process, so its presence stops the boot rather
+  // than being logged and survived.
+  assertLlmOnlyProcess();
+
   const app = Fastify({ logger: true });
 
   // Before the routes, so every priced response carries its price.

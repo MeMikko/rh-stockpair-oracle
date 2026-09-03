@@ -80,6 +80,14 @@ necessary (none planned).
 - `reproduce` must name something the *caller* can run, not the operator.
 - Keep the README honest about what is estimated vs measured, and record what
   did not reconcile rather than dropping it.
+- **Two Bankr keys, never one.** The public API holds a gateway-only key
+  (`BANKR_LLM_KEY`) and refuses to boot with `BANKR_API_KEY` present; the
+  wallet-scoped key lives only in the operator panel (`npm run admin`), which
+  binds loopback, is not published by Caddy, and gates on `ADMIN_ADDRESSES`
+  with its own secret and its own signed message. `npm run bankr:scope`
+  verifies the split against Bankr rather than against memory.
+- The agent has a wallet of its own; callers' funds are never touched. Say the
+  precise thing — "never holds *your* funds" — not the flattering one.
 
 ## Resolved (was: unknowns)
 - RPC `rpc.mainnet.chain.robinhood.com` (logs; no range cap, ~10k result cap,

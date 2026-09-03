@@ -128,7 +128,7 @@ export function registerPrepareSwap(app: FastifyInstance): void {
           note: 'Permit2.approve(token, universalRouter, amount, expiration)' },
       ],
       gas, gasError,
-      disclaimer: 'Unsigned calldata. This service never signs, never broadcasts, and never holds funds. Verify min-out before signing.',
+      disclaimer: 'Unsigned calldata. This service never signs, never broadcasts, and never holds your funds. Verify min-out before signing.',
       generatedAt: new Date().toISOString(),
     };
   });

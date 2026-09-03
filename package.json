@@ -31,7 +31,9 @@
     "ent": "node --env-file-if-exists=.env --import tsx scripts/entitlement.ts",
     "neynar:check": "node --env-file-if-exists=.env --import tsx scripts/neynar-check.ts",
     "secrets": "node --import tsx scripts/secrets.ts",
-    "diagnose": "node --env-file-if-exists=.env --import tsx scripts/diagnose-mention.ts"
+    "diagnose": "node --env-file-if-exists=.env --import tsx scripts/diagnose-mention.ts",
+    "admin": "node --env-file-if-exists=.env --env-file-if-exists=.env.admin --import tsx scripts/admin.ts",
+    "bankr:scope": "node --env-file-if-exists=.env --env-file-if-exists=.env.admin --import tsx scripts/bankr-scope.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",

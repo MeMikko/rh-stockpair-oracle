@@ -3,7 +3,7 @@
 Pricing and corporate-action data for **Robinhood Chain (4663)** pools where
 one side is a tokenized stock or ETF.
 
-Read-only. Nothing here signs, broadcasts, or holds funds. On Farcaster it
+Read-only. Nothing here signs, broadcasts, or holds your funds. On Farcaster it
 answers as [@vates](https://farcaster.xyz/vates).
 
 Currently in **launch mode** — served without charge and no key required —

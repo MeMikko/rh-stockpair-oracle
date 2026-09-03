@@ -497,7 +497,7 @@ retry with <code>x-payment: &lt;tx hash&gt;</code>. The transfer becomes prepaid
 ${fmt(uncovered)} of ${fmt(s.tokens)} stock tokens have no Chainlink feed, so for those a
 deviation is not merely unknown but unknowable on-chain. <code>depth</code> is an active-tick
 estimate that can mislead — trust <code>impact</code>, which is a quoter simulation.
-Nothing here signs, broadcasts, or holds funds.
+Nothing here signs, broadcasts, or holds your funds.
 </div>
 
 <div class="note">

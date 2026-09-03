@@ -119,6 +119,33 @@ ALCHEMY_API_KEY=...            # state and archive reads
 Farcaster credentials are only needed to *publish*. Leave them empty and the
 agent still scans, drafts and queues — it simply cannot send.
 
+### Two Bankr keys, two files
+
+A Bankr API key carries independent capability flags, and one key can hold all
+of them: LLM gateway, wallet, agent, token launch. The API process phrases
+answers through the gateway, attaching its key to a request whose body contains
+text a stranger wrote — so the key it holds must not be able to sign.
+
+So there are two keys in two files, and **no variable appears in both**:
+
+| File | Read by | Holds |
+|---|---|---|
+| `.env` | every unit | `BANKR_LLM_KEY` — LLM Gateway enabled, wallet/agent/token-launch **off** |
+| `.env.admin` | the operator panel only | `BANKR_API_KEY`, `ADMIN_AUTH_SECRET`, `ADMIN_ADDRESSES` |
+
+```bash
+sudo -u oracle nano /opt/rh-oracle/.env.admin
+sudo chmod 600 /opt/rh-oracle/.env.admin
+```
+
+`rh-oracle-api` refuses to start if `BANKR_API_KEY` is in its environment, so a
+mistake here fails loudly at boot rather than quietly at 3am. Confirm the split
+is real rather than assumed — the flags live in someone else's dashboard:
+
+```bash
+sudo -u oracle npm run bankr:scope     # asks Bankr what each key can do
+```
+
 ## Installing
 
 Two ways in. **Cloning on the server is the simpler one** and needs no SSH
@@ -309,11 +336,56 @@ observed rate this is not the binding constraint; a popular `/quote` would be.
 | `rh-oracle-watch` | always on | follows the tip for new v4 **and** v3 pools, 5 blocks behind |
 | `rh-oracle-sync.timer` | every 6h | registry, corporate calendar, holders, 24h volume |
 | `rh-oracle-agent.timer` | daily 07:30 | scans for signals and queues **drafts** |
+| `rh-oracle-admin` | on demand | operator panel on `127.0.0.1:8090`; the only unit holding `BANKR_API_KEY` |
 
 **Nothing on this box can publish.** The agent timer only writes to the
 approval queue; sending needs a person to approve a draft and then run
 `npm run agent:publish -- --live` by hand. That is deliberate, and it is why
 the timer is safe to leave enabled.
+
+## The operator panel
+
+The panel is where the agent's own wallet lives: balances, the approval queue,
+creator fees, and token launches. It is a **separate process on loopback**, not
+a route on the public API, because the credential it needs can move funds and
+the public process must never hold one that can.
+
+Caddy does not publish it. Reach it through an SSH tunnel:
+
+```bash
+ssh -L 8090:127.0.0.1:8090 oracle-box     # then open http://127.0.0.1:8090
+```
+
+A unit for it, started only when wanted:
+
+```ini
+# /etc/systemd/system/rh-oracle-admin.service
+[Unit]
+Description=RH oracle operator panel
+After=network-online.target
+
+[Service]
+User=oracle
+WorkingDirectory=/opt/rh-oracle
+EnvironmentFile=/opt/rh-oracle/.env
+EnvironmentFile=/opt/rh-oracle/.env.admin
+ExecStart=/usr/bin/npm run admin
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Two gates, not one. The port is not routable, **and** sign-in requires an
+address listed in `ADMIN_ADDRESSES` — signed against a different message and a
+different secret from the public site, so neither a public session nor a
+signature captured there is worth anything here. An empty allowlist means the
+panel refuses to start.
+
+Launching a token from the panel simulates by default; a real deploy needs the
+symbol typed back verbatim. Deploys are irreversible and capped at three
+counted attempts per rolling 24 hours per wallet, and on Robinhood Chain they
+are not gas-sponsored — the launch wallet needs its own ETH.
 
 ## Operating
 

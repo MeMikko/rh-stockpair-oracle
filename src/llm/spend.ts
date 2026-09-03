@@ -9,9 +9,10 @@
  *
  * Never on a request path. This is for the operator's report.
  */
+import { bankr } from '../../config/bankr.js';
 
-const BASE = process.env.BANKR_LLM_BASE_URL ?? 'https://llm.bankr.bot';
-const KEY = process.env.BANKR_LLM_API_KEY ?? '';
+const BASE = bankr.llmBaseUrl;
+const KEY = bankr.llmKey;
 
 export interface LlmSpend {
   days: number;

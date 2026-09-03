@@ -471,7 +471,29 @@ into the reverse proxy already serving that host, and a scoped ufw rule lets
 the proxy container reach the origin without opening the port to anything
 else.
 
-Never sends transactions and never holds funds.
+### The agent's own wallet, and why it is not here
+
+The Bankr API key that pays for drafting is the same *kind* of credential that
+can sign, transfer and launch tokens — the capability flags are independent,
+and one key can hold all of them. The API process attaches its key to a request
+whose body contains text a stranger wrote, so it holds a **gateway-only** key
+and nothing else. `buildServer()` refuses to start if `BANKR_API_KEY` is in its
+environment, because a server that quietly runs with a key that can move funds
+is worse than one that does not run.
+
+The wallet-scoped key lives in a separate process: `npm run admin`, bound to
+`127.0.0.1`, not published by Caddy, reached over an SSH tunnel. Two gates,
+not one — the port is unroutable, **and** sign-in needs an address listed in
+`ADMIN_ADDRESSES`, signed over a different message with a different secret
+from the public site, so neither a public session nor a signature captured
+there is worth anything there. `npm run bankr:scope` asks Bankr what each key
+can actually do rather than trusting the dashboard toggles to still be what
+you set them to.
+
+**This public service never signs, never broadcasts, and never holds a
+caller's funds.** The agent itself does have a wallet — that is how a
+self-funding agent pays for its own compute — but nothing in the public
+process can reach it.
 
 ## Phase 2 notes
 

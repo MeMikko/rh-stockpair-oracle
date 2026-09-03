@@ -28,6 +28,10 @@ const GENERATED: Record<string, { bytes: number; note: string }> = {
     bytes: 32,
     note: 'MUST match the secret Neynar shows for the webhook — if Neynar issued one, paste theirs instead',
   },
+  ADMIN_AUTH_SECRET: {
+    bytes: 32,
+    note: 'signs operator-panel sessions; must differ from AUTH_SECRET so a public session is not an admin one',
+  },
 };
 
 /** Issued elsewhere. Generating a value here would only fake being configured. */
@@ -37,7 +41,9 @@ const EXTERNAL: Record<string, string> = {
   NEYNAR_API_KEY: 'dev.neynar.com — required to read mentions or cast',
   NEYNAR_SIGNER_UUID: 'dev.neynar.com — must be an approved signer, made with the same API key',
   NEYNAR_AGENT_FID: "the agent account's own FID, not yours",
-  BANKR_LLM_API_KEY: 'llm.bankr.bot — optional; without it drafts fall back to templates',
+  BANKR_LLM_KEY: 'bankr.bot/api-keys — LLM Gateway ONLY; optional, drafts fall back to templates without it',
+  BANKR_API_KEY: 'bankr.bot/api-keys — wallet + token launch. ADMIN BOX ONLY; the public server refuses to boot with it',
+  ADMIN_ADDRESSES: 'the addresses allowed into the operator panel; not a secret, but the panel will not start without it',
 };
 
 const arg = (n: string): string | undefined =>

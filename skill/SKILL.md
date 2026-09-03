@@ -63,7 +63,7 @@ age from a block number.
 
 ## Endpoints
 
-All reads. Nothing here signs, broadcasts, or holds funds.
+All reads. Nothing here signs, broadcasts, or holds your funds.
 
 ```
 GET  /.well-known/agent.json     START HERE: endpoints, auth, payment, limits

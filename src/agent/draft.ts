@@ -1,5 +1,6 @@
 import type { Signal } from './signals.js';
 import { verifyDraft, MAX_POST_LENGTH, type VerificationResult } from './verify.js';
+import { bankr } from '../../config/bankr.js';
 
 export interface Draft {
   text: string;
@@ -9,9 +10,11 @@ export interface Draft {
 }
 
 export const agentEnv = {
-  llmBaseUrl: process.env.BANKR_LLM_BASE_URL ?? 'https://llm.bankr.bot',
-  llmApiKey: process.env.BANKR_LLM_API_KEY ?? '',
-  llmModel: process.env.BANKR_LLM_MODEL ?? 'claude-sonnet-5',
+  // Gateway-only credential; see config/bankr.ts for why drafting and the
+  // wallet never share a key.
+  llmBaseUrl: bankr.llmBaseUrl,
+  llmApiKey: bankr.llmKey,
+  llmModel: bankr.llmModel,
 };
 
 /**

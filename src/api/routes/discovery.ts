@@ -66,7 +66,10 @@ export function serviceDescriptor(): Record<string, unknown> {
       volumeFreshness:
         'Volume is a rolling 24h measurement refreshed every 6h, not live. GET /volume ' +
         'reports measuredSecondsAgo; use it rather than deriving age from a block delta.',
-      neverSigns: 'Nothing here signs, broadcasts, or holds funds. /prepare-swap returns calldata only.',
+      neverSigns:
+        'Nothing on this API signs, broadcasts, or holds your funds. /prepare-swap returns ' +
+        'calldata only. The agent has a wallet of its own for paying its own costs; no route ' +
+        'here can reach it.',
     },
 
     auth: {
