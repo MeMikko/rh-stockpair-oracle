@@ -1,0 +1,189 @@
+import type { Address, Hex } from 'viem';
+import { getClient } from '../../config/chain.js';
+import { getDb } from '../db/index.js';
+import { tokenMeta } from '../registry/tokenMeta.js';
+import { readPoolState, priceFromSqrtX96 } from '../pricing/poolState.js';
+import { readV3PoolState } from '../pricing/poolStateV3.js';
+import { stockContext } from '../pricing/stockContext.js';
+import { marketStatus } from '../pricing/marketHours.js';
+import { withRetry } from '../util/retry.js';
+
+/**
+ * One pool, one moment, written down.
+ *
+ * `/quote` answers what a pool is priced at now and forgets it. That is the
+ * right shape for a lookup and the wrong shape for the question this service
+ * is uniquely placed to answer: stock tokens trade 24/5 on-chain while the
+ * underlying equity market keeps hours, so *how far a pool drifts while the
+ * market is shut* is the premise of the whole project stated as a measurement.
+ * It cannot be read live and it cannot be backfilled — the public RPC has no
+ * archive and Alchemy's free tier caps `eth_getLogs` at ten blocks — so it
+ * exists only if it is recorded as it happens.
+ *
+ * Hence the session is stored on the same row as the deviation. Joining them
+ * afterwards from two sources would mean trusting that the clocks agreed.
+ */
+
+export interface Snapshot {
+  poolKey: string;
+  protocol: 'v4' | 'v3';
+  at: number;
+  block: number;
+  stockSymbol: string | null;
+  spot: number;
+  impliedUsd: number | null;
+  /** What the pool implies the stock is worth -- the number a reader asks for. */
+  poolStockUsd: number | null;
+  oracleUsd: number | null;
+  deviation: number | null;
+  /** Why there is no deviation. Null means one was measured. */
+  deviationReason: string | null;
+  liquidity: string;
+  marketSession: string;
+  marketOpen: boolean;
+}
+
+export interface SamplePool {
+  key: string;
+  protocol: 'v4' | 'v3';
+  token0: string;
+  token1: string;
+  fee: number;
+  stockSide: number | null;
+  stockSymbol: string | null;
+  pairedToken: string | null;
+  quoteKind: string;
+  swaps: number;
+}
+
+/**
+ * The pools worth sampling: stock-paired, busiest first.
+ *
+ * Ordered by measured swaps rather than by liquidity or recency, because a
+ * series is only worth its storage where something trades. A pool with no
+ * swaps draws a flat line that says nothing about drift.
+ */
+export function poolsToSample(limit: number): SamplePool[] {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT * FROM (
+         SELECT p.pool_id AS key, 'v4' AS protocol, p.currency0 AS token0, p.currency1 AS token1,
+                p.fee AS fee, p.stock_side AS stockSide, p.stock_symbol AS stockSymbol,
+                p.paired_token AS pairedToken, p.quote_kind AS quoteKind,
+                COALESCE(v.swaps, 0) AS swaps
+         FROM pools p
+         LEFT JOIN pool_volume v ON v.pool_key = p.pool_id AND v.protocol = 'v4'
+         WHERE p.stock_symbol IS NOT NULL
+         UNION ALL
+         SELECT p3.address AS key, 'v3' AS protocol, p3.token0, p3.token1,
+                p3.fee AS fee, p3.stock_side AS stockSide, p3.stock_symbol AS stockSymbol,
+                p3.paired_token AS pairedToken, p3.quote_kind AS quoteKind,
+                COALESCE(v3.swaps, 0) AS swaps
+         FROM pools_v3 p3
+         LEFT JOIN pool_volume v3 ON v3.pool_key = p3.address AND v3.protocol = 'v3'
+         WHERE p3.stock_symbol IS NOT NULL
+       )
+       ORDER BY swaps DESC, key
+       LIMIT ?`,
+    )
+    .all(limit) as unknown as SamplePool[];
+}
+
+/** Read one pool's current state and turn it into a row. Writes nothing. */
+export async function takeSnapshot(pool: SamplePool, at = Date.now()): Promise<Snapshot> {
+  const [m0, m1, block] = await Promise.all([
+    tokenMeta(pool.token0 as Address),
+    tokenMeta(pool.token1 as Address),
+    withRetry(() => getClient().getBlockNumber(), { label: 'blockNumber' }),
+  ]);
+
+  let spot: number;
+  let liquidity: bigint;
+
+  if (pool.protocol === 'v4') {
+    const s = await readPoolState(pool.key as Hex, pool.fee);
+    spot = priceFromSqrtX96(s.sqrtPriceX96, m0.decimals, m1.decimals);
+    liquidity = s.liquidity;
+  } else {
+    const s = await readV3PoolState(pool.key as Address);
+    spot = priceFromSqrtX96(s.sqrtPriceX96, m0.decimals, m1.decimals);
+    liquidity = s.liquidity;
+  }
+
+  const ctx = await stockContext({
+    quoteKind: pool.quoteKind,
+    stockSymbol: pool.stockSymbol,
+    pairedToken: pool.pairedToken,
+    stockSide: pool.stockSide,
+    currency0: pool.token0,
+    currency1: pool.token1,
+    spot,
+  });
+
+  const market = marketStatus(new Date(at));
+
+  return {
+    poolKey: pool.key.toLowerCase(),
+    protocol: pool.protocol,
+    at,
+    block: Number(block),
+    stockSymbol: pool.stockSymbol,
+    spot,
+    impliedUsd: ctx.impliedUsd,
+    poolStockUsd: ctx.deviation.poolImpliedStockUsd,
+    oracleUsd: ctx.oracle?.priceUsd ?? null,
+    deviation: ctx.deviation.deviation,
+    deviationReason: ctx.deviation.reason,
+    liquidity: liquidity.toString(),
+    marketSession: market.session,
+    marketOpen: market.isOpen,
+  };
+}
+
+export function saveSnapshots(rows: Snapshot[]): number {
+  if (rows.length === 0) return 0;
+  const db = getDb();
+  const stmt = db.prepare(
+    `INSERT OR IGNORE INTO quote_snapshots
+       (pool_key, protocol, at, block, stock_symbol, spot, implied_usd, pool_stock_usd,
+        oracle_usd, deviation, deviation_reason, liquidity, market_session, market_open)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  db.exec('BEGIN');
+  try {
+    for (const r of rows) {
+      stmt.run(
+        r.poolKey, r.protocol, r.at, r.block, r.stockSymbol,
+        // Text, not REAL: these are ratios and money, and a float would round
+        // away exactly the small deviations the series exists to record.
+        String(r.spot),
+        r.impliedUsd === null ? null : String(r.impliedUsd),
+        r.poolStockUsd === null ? null : String(r.poolStockUsd),
+        r.oracleUsd === null ? null : String(r.oracleUsd),
+        r.deviation === null ? null : String(r.deviation),
+        r.deviationReason, r.liquidity, r.marketSession, r.marketOpen ? 1 : 0,
+      );
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return rows.length;
+}
+
+/**
+ * Drop what is older than the retention window.
+ *
+ * A cap exists because this runs on a shared box, not because the data stops
+ * being interesting. Whoever raises it should raise the disk first.
+ */
+export function pruneHistory(days: number): { snapshots: number; volume: number } {
+  const db = getDb();
+  const cutoffMs = Date.now() - days * 86_400_000;
+  const cutoffS = Math.floor(cutoffMs / 1000);
+  const snapshots = db.prepare('DELETE FROM quote_snapshots WHERE at < ?').run(cutoffMs);
+  const volume = db.prepare('DELETE FROM pool_volume_history WHERE to_ts < ?').run(cutoffS);
+  return { snapshots: Number(snapshots.changes ?? 0), volume: Number(volume.changes ?? 0) };
+}

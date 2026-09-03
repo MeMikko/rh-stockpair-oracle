@@ -315,3 +315,61 @@ CREATE TABLE IF NOT EXISTS x402_authorizations (
   settled_tx TEXT
 );
 CREATE INDEX IF NOT EXISTS x402_authorizations_payer ON x402_authorizations(payer);
+
+-- Volume, kept rather than overwritten.
+--
+-- `pool_volume` holds one row per pool and each measurement replaces the last,
+-- which is right for "what is trading now" and throws away the only asset this
+-- service can build that a newcomer cannot copy. The public RPC has no archive
+-- and Alchemy's free tier caps eth_getLogs at ten blocks, so a competitor
+-- starting tomorrow gets the same snapshot and never gets last week. Every
+-- measurement not kept is a week nobody can reconstruct.
+--
+-- Stock-paired pools only. The v4 scan is chain-wide by necessity (one address
+-- filter covers the protocol), so `pool_volume` carries every pool that
+-- traded; keeping a permanent record of pools this service never answers about
+-- would be storing data for its own sake.
+CREATE TABLE IF NOT EXISTS pool_volume_history (
+  pool_key     TEXT NOT NULL,
+  protocol     TEXT NOT NULL,            -- v4 | v3
+  to_ts        INTEGER NOT NULL,         -- window end: the sample's own timestamp
+  from_block   INTEGER NOT NULL,
+  to_block     INTEGER NOT NULL,
+  from_ts      INTEGER NOT NULL,
+  swaps        INTEGER NOT NULL,
+  abs_amount0  TEXT NOT NULL,
+  abs_amount1  TEXT NOT NULL,
+  measured_at  INTEGER NOT NULL,
+  PRIMARY KEY (pool_key, protocol, to_ts)
+);
+CREATE INDEX IF NOT EXISTS pool_volume_history_time ON pool_volume_history(to_ts);
+
+-- What a pool was priced at, and what the equity market was doing at the time.
+--
+-- The pairing is the point. `/quote` can say the pool has drifted 1.8% from
+-- Chainlink right now; only a series that records the session alongside the
+-- deviation can say whether that is normal for a Tuesday at 03:00 ET. That
+-- question is the premise of this whole service stated as a measurement, and
+-- it cannot be answered from live reads at all.
+--
+-- Numbers are TEXT because they are money and ratios, not counters: SQLite
+-- REAL would silently round the small deviations that matter most.
+CREATE TABLE IF NOT EXISTS quote_snapshots (
+  pool_key       TEXT NOT NULL,
+  protocol       TEXT NOT NULL,          -- v4 | v3
+  at             INTEGER NOT NULL,       -- ms since epoch
+  block          INTEGER NOT NULL,
+  stock_symbol   TEXT,
+  spot           TEXT NOT NULL,          -- currency1 per currency0
+  implied_usd    TEXT,                   -- paired token in USD, null without a feed
+  pool_stock_usd TEXT,                   -- what the POOL implies the stock is worth
+  oracle_usd     TEXT,                   -- the stock's Chainlink price, null without a feed
+  deviation      TEXT,                   -- signed fraction; null is unknowable, never zero
+  deviation_reason TEXT,                 -- null when a deviation WAS measured
+  liquidity      TEXT NOT NULL,
+  market_session TEXT NOT NULL,          -- regular | pre | post | closed
+  market_open    INTEGER NOT NULL,       -- 0 | 1
+  PRIMARY KEY (pool_key, at)
+);
+CREATE INDEX IF NOT EXISTS quote_snapshots_symbol_time ON quote_snapshots(stock_symbol, at);
+CREATE INDEX IF NOT EXISTS quote_snapshots_time ON quote_snapshots(at);

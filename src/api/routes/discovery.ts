@@ -55,6 +55,11 @@ export function serviceDescriptor(): Record<string, unknown> {
       'POST /prepare-swap':
         'unsigned calldata with a min-out from the quoter: UniversalRouter for a v4 pool, ' +
         'SwapRouter for a v3 pool. Single-hop only; v3 requires an explicit recipient',
+      'GET /history?symbol=&hours=':
+        'what this service recorded, rather than what it reads now: the price series for a ' +
+        "stock's busiest pool and the drift against Chainlink split by market session. " +
+        'Cannot be reconstructed from the chain — the public RPC has no archive — so it ' +
+        'covers only what has been sampled. GET /health reports the depth, free',
       'POST /ask': 'free-text question; returns facts and a reproduce call',
       'GET /x402/supported': 'which payment schemes and network this deployment settles',
       'POST /x402/topup': 'turn a USDC transfer into prepaid credit: {"txHash": "0x…"}',

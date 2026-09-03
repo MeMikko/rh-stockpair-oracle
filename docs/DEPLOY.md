@@ -366,6 +366,7 @@ observed rate this is not the binding constraint; a popular `/quote` would be.
 | `rh-oracle-api` | always on | serves `/quote`, `/prepare-swap`, `/gas`, `/corporate-actions`, `/coverage`, `/ask` |
 | `rh-oracle-watch` | always on | follows the tip for new v4 **and** v3 pools, 5 blocks behind |
 | `rh-oracle-sync.timer` | every 6h | registry, corporate calendar, holders, 24h volume |
+| `rh-oracle-sample.timer` | every 15min | records what the busiest stock-paired pools are priced at, with the market session on the same row. The only data here that cannot be rebuilt: the public RPC has no archive, so a sweep that does not run is a gap nobody can fill |
 | `rh-oracle-agent.timer` | daily 07:30 | scans for signals and queues **drafts** |
 | `rh-oracle-admin` | on demand | operator panel on `127.0.0.1:8090`; the only unit holding `BANKR_API_KEY` |
 
@@ -386,6 +387,25 @@ Caddy does not publish it. Reach it through an SSH tunnel:
 ```bash
 ssh -L 8090:127.0.0.1:8090 oracle-box     # then open http://127.0.0.1:8090
 ```
+
+### The sampler is the one timer whose misses cost something
+
+Every other job here recomputes a current fact and can catch up. The sampler
+writes what a pool was priced at *at a moment*, alongside what the equity
+market was doing then, and the public RPC has no archive — so a sweep that
+does not run is a gap nobody can fill later, including us. `Persistent=false`
+is deliberate for exactly that reason: a catch-up run would write a row
+timestamped now and labelled with a session that was not the one it measured,
+which is worse than the gap.
+
+```bash
+sudo systemctl enable --now rh-oracle-sample.timer
+systemctl list-timers rh-oracle-sample.timer
+curl -s localhost:8080/health | grep -o '"history":{[^}]*}'   # depth, free
+```
+
+`GET /health` publishes how much history exists, so an operator can see the
+record growing without paying for `/history`.
 
 `ops/systemd/rh-oracle-admin.service` ships with the rest and is installed by
 the deploy, but **not enabled**: a process holding the wallet key has no reason

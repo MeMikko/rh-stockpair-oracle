@@ -38,6 +38,12 @@ than earn margin; see `config/pricing.ts`.
    - `GET /corporate-actions` – the published calendar joined to the indexed
      pool set. Both halves are public; nothing else joins them.
    - `GET /coverage` – which stock tokens have a Chainlink feed.
+   - `GET /history` – what was recorded, not what is read now: the price
+     series for a stock's busiest pool and the drift against Chainlink split
+     by market session. The only endpoint here a competitor cannot match by
+     being cleverer — the public RPC has no archive, so nobody can start today
+     and produce last week. A sweep that does not run is a gap nobody can fill.
+     `/health` publishes the depth free, so a caller checks before paying.
    - `POST /ask` – free text in, structured answer out, with the facts behind
      it and the call that reproduces it. Keyword intent matching over a closed
      set; no model in this path either.
@@ -129,5 +135,13 @@ necessary (none planned).
    through the Bankr gateway and through prepaid credit; set the facilitator
    the day `npm run x402:check -- <url>` finds one that settles `exact` on
    Base, and `exact` turns itself back on.
+
+6. ⬜ Retention is live (`rh-oracle-sample.timer`, every 15min). The series is
+   worthless until it is long: `detectClosedMarketDrift` publishes nothing
+   below 12 samples a side, and `/ask` says it has not recorded enough rather
+   than reading a slope into four readings. Next: reach, not features — an MCP
+   server over the same endpoints is the cheapest order-of-magnitude in
+   callers, and can be built any day; retention could not wait, because every
+   day without it is a day nobody can reconstruct.
 
 Target: first public post ready before the gas subsidy ends (late Sept 2026).

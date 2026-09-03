@@ -1,0 +1,16 @@
+[Unit]
+Description=Sample stock-paired pool prices every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+# Spread across the interval rather than landing on the quarter hour with
+# everything else on the box.
+RandomizedDelaySec=2min
+# Deliberately NOT Persistent. A missed sweep is a gap in the record, and a
+# gap is honest; catching up on boot would write a row timestamped now and
+# labelled with a market session that was not the one being measured.
+Persistent=false
+
+[Install]
+WantedBy=timers.target
