@@ -126,6 +126,21 @@ describe('a signed payment', () => {
     expect(row.settled_tx).toBe('0xsettled');
   });
 
+  /**
+   * x402-fetch sends X-PAYMENT; Bankr's hand-rolled example sends
+   * PAYMENT-SIGNATURE. Refusing a payment over the header it arrived in is a
+   * 402 the caller cannot debug.
+   */
+  it('is read under either header name', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/quote',
+      headers: { 'payment-signature': payment('0x0a') },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-payment-response']).toBeDefined();
+  });
+
   /** One authorization, one response. The replay window is the point. */
   it('cannot be replayed for a second call', async () => {
     await app.inject({ method: 'GET', url: '/quote', headers: { 'x-payment': payment('0x02') } });

@@ -24,13 +24,25 @@ import { facilitatorConfigured, x402Config } from '../../config/x402.js';
  * on a call the caller may already have paid for.
  */
 
-export const X402_VERSION = 1;
+/** What an unpaid caller is told to speak. A payer's own version wins. */
+export const X402_VERSION = Number.isFinite(x402Config.version) && x402Config.version > 0
+  ? x402Config.version
+  : 1;
 
 /** What a caller must pay, in the shape x402 defines. */
 export interface PaymentRequirements {
   scheme: string;
   network: string;
+  /**
+   * The price, under both spellings.
+   *
+   * x402 v1 calls it `maxAmountRequired`; the v2 bodies Bankr's own endpoints
+   * emit call it `amount`. They are the same number here, and sending both
+   * costs one field rather than a class of client that reads the wrong one
+   * and finds nothing.
+   */
   maxAmountRequired: string;
+  amount?: string;
   resource: string;
   description: string;
   mimeType: string;
@@ -117,7 +129,7 @@ export async function verifyPayment(
   paymentRequirements: PaymentRequirements,
 ): Promise<VerifyResult> {
   const res = await post<VerifyResult & { valid?: boolean; reason?: string }>('/verify', {
-    x402Version: X402_VERSION,
+    x402Version: paymentPayload.x402Version || X402_VERSION,
     paymentPayload,
     paymentRequirements,
   });
@@ -140,7 +152,7 @@ export async function settlePayment(
   paymentRequirements: PaymentRequirements,
 ): Promise<SettleResult> {
   const res = await post<SettleResult & { txHash?: string; error?: string }>('/settle', {
-    x402Version: X402_VERSION,
+    x402Version: paymentPayload.x402Version || X402_VERSION,
     paymentPayload,
     paymentRequirements,
   });

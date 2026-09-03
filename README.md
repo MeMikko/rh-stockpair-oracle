@@ -454,12 +454,28 @@ causes it was. The payer address is used for per-payer usage counting
 entitlement — a paid call is a paid call.
 
 **Door 2 — this origin speaking `exact` itself**, for callers that would rather
-pay `oracle.sb4s.xyz` than a gateway. Bankr publishes no facilitator API for
-other people's servers, so `X402_FACILITATOR_URL` is a standard open
-facilitator (Coinbase's at `https://x402.org/facilitator`, or any conforming
-one) — pointing it at Bankr would 402 every caller with an error about
-signatures. With it set, `accepts[0]` is a real `exact` requirement on `base`
-and `x402-fetch` pays this service unchanged.
+pay `oracle.sb4s.xyz` than a gateway. `X402_FACILITATOR_URL` names who verifies
+and submits the authorization; with it set, `accepts[0]` is a real `exact`
+requirement on `base` and `x402-fetch` pays this service unchanged.
+
+Which facilitator is a question the check answers rather than one this README
+should assert. Bankr's own hosted endpoints advertise
+`https://api.bankr.bot/facilitator` in their 402 bodies, but Bankr documents it
+as the facilitator *behind those endpoints* rather than as an open one for
+other people's origins — it may or may not verify for this one. Coinbase's
+`https://x402.org/facilitator` is the standard open alternative. Run
+`npm run x402:check -- <url>` against each and use whichever answers
+`/supported` with `exact` on `base`; a wrong guess here 402s every caller with
+an error about signatures, which reads to them as their problem.
+
+**Two spellings are read where Bankr's own surfaces disagree.** The payment
+header is `X-PAYMENT` for x402-fetch and `PAYMENT-SIGNATURE` in Bankr's
+hand-rolled example, so both are accepted. The price field is
+`maxAmountRequired` in v1 and `amount` in the v2 bodies Bankr emits, so the 402
+carries both — the same number under two keys costs one field and saves a class
+of client that reads the wrong one and finds nothing. The version a payer
+declares is the version the facilitator is asked to verify, rather than being
+rewritten to whatever this service advertises (`X402_VERSION`, default 1).
 
 ```
 GET /quote            → 402  { accepts: [ {scheme:"exact", …}, {scheme:"onchain-transfer-credit", …} ] }
