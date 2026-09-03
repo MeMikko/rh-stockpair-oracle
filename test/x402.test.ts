@@ -8,13 +8,16 @@ process.env.DB_PATH = join(mkdtempSync(join(tmpdir(), 'x402-')), 'test.db');
 // and a facilitator configured after the fact would not be advertised.
 process.env.X402_FACILITATOR_URL = 'https://facilitator.example/x402';
 process.env.X402_RESOURCE_BASE = 'https://oracle.sb4s.xyz';
-process.env.X402_SERVICE_KEYS = 'bankr-cloud:0123456789abcdef0123456789abcdef,short:tooshort';
+process.env.VATES_BACKEND_SECRET = '0123456789abcdef0123456789abcdef';
+process.env.X402_GATEWAY_URL =
+  'https://x402.bankr.bot/0x4b19ee2a3de2521a3adc901989944c209c0a60ea/vates';
 
 const { getDb } = await import('../src/db/index.js');
 const {
   creditBalance, addCredit, spendCredit, payment402Body, requirementsFor,
-  readPaymentHeader, serviceKeyName, LEGACY_SCHEME,
+  readPaymentHeader, LEGACY_SCHEME,
 } = await import('../src/api/x402.js');
+const { readGatewayRequest } = await import('../src/payments/gateway.js');
 const { claimPayment, claimCredit } = await import('../src/payments/verify.js');
 
 const PAYER = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
@@ -149,20 +152,55 @@ describe('reading the X-PAYMENT header', () => {
   });
 });
 
-describe('service keys', () => {
-  it('matches a configured key by name', () => {
-    expect(serviceKeyName('0123456789abcdef0123456789abcdef')).toBe('bankr-cloud');
+describe('a request from Bankr’s gateway', () => {
+  const SECRET = '0123456789abcdef0123456789abcdef';
+  const PAYER_ADDR = '0x4B19Ee2a3De2521A3aDc901989944c209C0a60eA';
+
+  it('is trusted when the shared secret matches, and names the payer', () => {
+    const res = readGatewayRequest({
+      'x-bankr-secret': SECRET,
+      'x-402-payer': PAYER_ADDR,
+    });
+    expect(res.trusted).toBe(true);
+    expect(res.payer).toBe(PAYER_ADDR.toLowerCase());
   });
 
-  it('rejects anything else', () => {
-    expect(serviceKeyName('0123456789abcdef0123456789abcdee')).toBeNull();
-    expect(serviceKeyName('')).toBeNull();
-    expect(serviceKeyName(undefined)).toBeNull();
+  /**
+   * The header that says who paid is a plain string anyone can set. Trusting
+   * it on its own would turn the payment wall into decoration.
+   */
+  it('ignores a payer header presented without the secret', () => {
+    const res = readGatewayRequest({ 'x-402-payer': PAYER_ADDR });
+    expect(res.trusted).toBe(false);
+    expect(res.payer).toBeNull();
+    expect(res.reason).toMatch(/x-bankr-secret/);
   });
 
-  /** A short secret is a weak one, and it is dropped rather than accepted. */
-  it('ignores a key too short to be worth having', () => {
-    expect(serviceKeyName('tooshort')).toBeNull();
+  it('refuses a wrong secret, and says so distinctly', () => {
+    const res = readGatewayRequest({ 'x-bankr-secret': `${SECRET.slice(0, -1)}0` });
+    expect(res.trusted).toBe(false);
+    expect(res.reason).toMatch(/did not match/);
+  });
+
+  it('leaves an ordinary call alone', () => {
+    expect(readGatewayRequest({}).reason).toBe('not a gateway request');
+  });
+
+  /** The money is collected either way, so a malformed payer is dropped, not refused. */
+  it('still serves a settled request whose payer header is malformed', () => {
+    const res = readGatewayRequest({ 'x-bankr-secret': SECRET, 'x-402-payer': 'not-an-address' });
+    expect(res.trusted).toBe(true);
+    expect(res.payer).toBeNull();
+  });
+});
+
+describe('the 402 points at the gateway too', () => {
+  it('names where a Bankr caller should call instead', () => {
+    const body = payment402Body('/quote', DOMAIN);
+    expect(body.settlement.bankrGateway).toMatchObject({
+      url: 'https://x402.bankr.bot/0x4b19ee2a3de2521a3adc901989944c209c0a60ea/vates',
+      trustedByOrigin: true,
+    });
   });
 });
 

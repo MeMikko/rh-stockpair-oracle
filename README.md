@@ -308,9 +308,12 @@ answer is skipped rather than answered with a shrug.
 - [x] Phase 4 — deployed to oracle.sb4s.xyz
 - [ ] Phase 4 — open the skills-repo PR
 - [x] Speak real x402: scheme `exact`, verified and settled through a facilitator
-- [ ] Point `X402_FACILITATOR_URL` at Bankr's facilitator, confirm with
+- [x] Accept paid requests from Bankr's hosted gateway (`vates`), authenticated
+      by shared secret rather than by a header anyone can set
+- [ ] Set `VATES_BACKEND_SECRET` on both sides and confirm the gateway hop with
+      a live call
+- [ ] Point `X402_FACILITATOR_URL` at a standard facilitator, confirm with
       `npm run x402:check`, and flip `PRICING_MODE=paid`
-- [ ] Deploy `x402/oracle` to Bankr x402 Cloud for marketplace discovery
 
 ## Pricing
 
@@ -364,17 +367,35 @@ page does not exist for the callers this service is built for.
 
 ## Pro, and paying per call
 
-**The 402 now speaks the published protocol, settled through Bankr.** It used
-to be x402-*shaped* and said so: an ordinary transfer whose hash was presented
-afterwards, honestly named `onchain-transfer-credit` so a standard client would
-fail cleanly rather than sign an authorization nobody read. Honest, and
-useless — no off-the-shelf client could pay it, which is the entire point of
-speaking the protocol.
+**Two doors now, and Bankr is one of them.** The 402 used to be x402-*shaped*
+and said so: an ordinary transfer whose hash was presented afterwards, honestly
+named `onchain-transfer-credit` so a standard client would fail cleanly rather
+than sign an authorization nobody read. Honest, and useless — no off-the-shelf
+client could pay it, which is the entire point of speaking the protocol.
 
-The missing piece was a facilitator: someone to check an EIP-3009
-authorization and submit it. Bankr runs one and covers the gas. So `accepts[0]`
-is now a real `exact` requirement on `base`, and `x402-fetch`,
-`bankr x402 call` and an app's `bankr.x402.fetch` pay this service unchanged.
+**Door 1 — Bankr's gateway**, which is what Bankr's x402 product actually is.
+Bankr hosts the payment wall in front of this service at
+`https://x402.bankr.bot/0x4b19…60ea/vates`, issues its own 402, takes the USDC
+on Base, settles it, and forwards the paid request here with `x-402-payer`
+naming who paid. Nothing about payment happens in this process on that path;
+the only question is whether the request is really from the gateway, and the
+shared secret (`VATES_BACKEND_SECRET`, sent as `x-bankr-secret`) is the answer.
+
+That secret is treated as **required**, not optional. `x-402-payer` is a plain
+string: if carrying it were enough to be served, anyone could set it and step
+around the wall, and the wall would be decoration. So an unmatched gateway
+request is unpaid, and the refusal is logged with which of the three distinct
+causes it was. The payer address is used for per-payer usage counting
+(`x402:0x…` in `npm run usage`), returned in `x-oracle-payer`, and grants no
+entitlement — a paid call is a paid call.
+
+**Door 2 — this origin speaking `exact` itself**, for callers that would rather
+pay `oracle.sb4s.xyz` than a gateway. Bankr publishes no facilitator API for
+other people's servers, so `X402_FACILITATOR_URL` is a standard open
+facilitator (Coinbase's at `https://x402.org/facilitator`, or any conforming
+one) — pointing it at Bankr would 402 every caller with an error about
+signatures. With it set, `accepts[0]` is a real `exact` requirement on `base`
+and `x402-fetch` pays this service unchanged.
 
 ```
 GET /quote            → 402  { accepts: [ {scheme:"exact", …}, {scheme:"onchain-transfer-credit", …} ] }
@@ -413,11 +434,12 @@ silently granted a 30-day unmetered subscription to someone who meant to buy a
 dollar of calls. One transaction now buys one thing, and `purpose` on the
 payments row is what makes that true rather than hoped for.
 
-**Discovery is the other half, and is a deployment step.** `x402/oracle` is a
-handler for Bankr's x402 Cloud that forwards to this origin, so an agent that
-pays for things through Bankr finds the endpoint in Bankr's catalogue without
-ever having heard of `oracle.sb4s.xyz`. It presents `x-oracle-service-key`,
-which tells the origin the money was already collected; see `x402/README.md`.
+Both doors are documented for machines as well as for people: the 402 body and
+`/.well-known/agent.json` carry the gateway URL and whether this origin can
+authenticate it, and `GET /x402/supported` says what this deployment settles
+before a caller signs anything. `x402/README.md` has the operator's side,
+including the one thing that can only be checked with a live call — that the
+gateway preserves the request path.
 
 Two surfaces, two shapes, because they are genuinely different problems.
 
@@ -446,9 +468,10 @@ payment is how a subscription quietly becomes free.
 
 **x402 — pay per call, no account.** An agent that found this in a catalogue
 calls, gets a 402 describing exactly what to pay and where, pays, and calls
-again. `GET /x402/supported` says which schemes and network this deployment
-actually settles, so a client can find out before signing rather than after
-being refused.
+again — either through Bankr's gateway, where Bankr does the collecting, or
+against this origin directly. `GET /x402/supported` says which schemes, which
+network and which gateway this deployment actually honours, so a client can
+find out before signing rather than after being refused.
 
 Off while `PRICING_MODE=launch` — every route is served and the 402 never
 fires, while the price headers say what it will cost.

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { getDb } from '../db/index.js';
 import { chargedFor, priceFor, pricingMode } from '../../config/pricing.js';
+import { readGatewayRequest } from '../payments/gateway.js';
 
 /**
  * Per-route usage accounting, and pricing published on every response.
@@ -12,10 +13,11 @@ import { chargedFor, priceFor, pricingMode } from '../../config/pricing.js';
  * caller planning around this service deserves to know what it will cost
  * before it starts costing, which a header on every response gives them.
  *
- * Callers are identified by API key when one is presented and otherwise by a
- * salted hash of the remote address. The raw address is never stored: this is
- * a usage counter, not a visitor log, and a per-install salt means the hashes
- * are not comparable across deployments either.
+ * Callers are identified by the paying address when the request came through
+ * Bankr's gateway with its shared secret, by API key when one is presented,
+ * and otherwise by a salted hash of the remote address. The raw IP is never
+ * stored: this is a usage counter, not a visitor log, and a per-install salt
+ * means the hashes are not comparable across deployments either.
  *
  * Behind a CDN the remote address is the CDN's, not the caller's, so every
  * caller would collapse into a handful of edge IPs and the per-caller counts
@@ -54,14 +56,18 @@ function clientIp(req: { headers: Record<string, unknown>; ip: string }): string
   return value.split(',')[0]!.trim();
 }
 
-function callerId(apiKey: string | undefined, serviceKey: string | undefined, ip: string): string {
-  // A paid handler in front of this origin -- Bankr x402 Cloud -- is one
-  // caller in the counter, not thousands of edge addresses. Counting its
-  // traffic as its own line is the only way to see how much of the demand
-  // arrives through the marketplace rather than direct.
-  if (serviceKey) {
-    return `svc:${createHash('sha256').update(serviceKey).digest('hex').slice(0, 16)}`;
-  }
+function callerId(
+  apiKey: string | undefined,
+  gatewayPayer: string | null,
+  ip: string,
+): string {
+  // Traffic through Bankr's gateway is counted per paying address, not per
+  // edge IP: the gateway is one host, so without this every Bankr caller
+  // would collapse into a single line and the demand a pricing decision reads
+  // would be one number. The address is not hashed because it is already a
+  // public identifier of a payer, and it is only read from a request whose
+  // shared secret matched -- an unverified payer header never reaches here.
+  if (gatewayPayer) return `x402:${gatewayPayer}`;
   if (apiKey) return `key:${createHash('sha256').update(apiKey).digest('hex').slice(0, 16)}`;
   return `ip:${createHash('sha256').update(SALT + ip).digest('hex').slice(0, 16)}`;
 }
@@ -110,13 +116,13 @@ export function registerMetering(app: FastifyInstance): void {
 
     try {
       const key = req.headers['x-api-key'];
-      const service = req.headers['x-oracle-service-key'];
+      const gateway = readGatewayRequest(req.headers as Record<string, unknown>);
       record.run(
         dayOf(Date.now()),
         route,
         callerId(
           typeof key === 'string' ? key : undefined,
-          typeof service === 'string' ? service : undefined,
+          gateway.trusted ? gateway.payer : null,
           clientIp(req as unknown as { headers: Record<string, unknown>; ip: string }),
         ),
         Date.now(),

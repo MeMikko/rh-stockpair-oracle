@@ -3,7 +3,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getDb } from '../db/index.js';
 import { PAYMENT_CHAIN_ID, paymentConfig } from '../../config/payments.js';
 import { ROUTE_PRICES, priceFor, pricingMode } from '../../config/pricing.js';
-import { facilitatorConfigured, resourceUrl, x402Config } from '../../config/x402.js';
+import {
+  facilitatorConfigured, gatewayAdvertised, gatewayTrusted, resourceUrl, x402Config,
+} from '../../config/x402.js';
 import { claimCredit } from '../payments/verify.js';
 import { addCredit, creditBalance, spendCredit } from '../payments/credit.js';
 import { assetDomain, type AssetDomain } from '../payments/asset.js';
@@ -11,6 +13,7 @@ import {
   FacilitatorUnavailable, settlePayment, verifyPayment, X402_VERSION,
   type PaymentPayload, type PaymentRequirements,
 } from '../payments/facilitator.js';
+import { readGatewayRequest } from '../payments/gateway.js';
 import { tierForSession } from '../auth/session.js';
 
 /**
@@ -24,21 +27,24 @@ import { tierForSession } from '../auth/session.js';
  * **Two schemes are offered, and the standard one is offered first.**
  *
  *  - `exact` — the published x402 scheme. The caller signs an EIP-3009
- *    authorization, sends it in `X-PAYMENT`, and a facilitator (Bankr) checks
- *    it and submits it. Nobody funds a wallet, nobody pays gas, and every
- *    off-the-shelf client — x402-fetch, `bankr x402 call`, an app's
- *    `bankr.x402.fetch` — already speaks it. This is what makes the service
- *    callable by an agent that has never heard of it.
+ *    authorization, sends it in `X-PAYMENT`, and a facilitator checks it and
+ *    submits it. Nobody funds a wallet, nobody pays gas, and every
+ *    off-the-shelf client — x402-fetch, an app's `bankr.x402.fetch` — already
+ *    speaks it. This is what makes the service callable by an agent that has
+ *    never heard of it. The facilitator is a standard open one; Bankr
+ *    publishes no facilitator API for other people's servers.
  *  - `onchain-transfer-credit` — the older path, kept because callers use it.
  *    An ordinary USDC transfer whose hash is presented afterwards buys a
  *    balance that many calls draw down. It is honestly named: advertising it
  *    as `exact` once made standard clients sign an authorization nobody read
  *    and loop on the retry.
  *
- * A third door exists for one specific caller: a handler on Bankr's x402
- * Cloud, which has already collected the money before it reaches this origin.
- * It presents a service key, and is the only credential that skips payment
- * without either a session or a signed authorization.
+ * A third door belongs to Bankr's hosted gateway, which is Bankr's actual
+ * x402 product: it issues its own 402, takes the payment, settles on Base and
+ * forwards the request here with `x-402-payer`. Nothing is verified or settled
+ * in this process on that path — the only question is whether the request is
+ * really from the gateway, which is what the shared secret answers. See
+ * `src/payments/gateway.ts`.
  *
  * Off while `PRICING_MODE=launch`: everything is served, the 402 never fires,
  * and the price headers say what it will cost. Flipping to `paid` turns this
@@ -47,8 +53,7 @@ import { tierForSession } from '../auth/session.js';
 
 const HEADER_PAYMENT = 'x-payment';
 const HEADER_RESPONSE = 'x-payment-response';
-/** Presented by a paid handler in front of this origin. Never by an end caller. */
-const HEADER_SERVICE = 'x-oracle-service-key';
+
 
 export const LEGACY_SCHEME = 'onchain-transfer-credit';
 
@@ -134,7 +139,7 @@ export function payment402Body(route: string, domain: AssetDomain) {
           'X-PAYMENT header, and it is verified and settled through the facilitator above. ' +
           'Gas is the facilitator’s, not yours.'
         : 'No facilitator is configured on this deployment, so the `exact` scheme is not ' +
-          'offered. Use the credit scheme below.',
+          'offered. Pay through the Bankr gateway below, or use the credit scheme.',
       // The alternative, said explicitly because it is the part that differs
       // from a naive reading of x402.
       creditScheme: LEGACY_SCHEME,
@@ -145,6 +150,18 @@ export function payment402Body(route: string, domain: AssetDomain) {
         'credit and each call debits its own price. Any amount works, with no minimum; larger ' +
         'transfers mean fewer transfers.',
       creditEndpoint: 'GET /x402/balance?payer=0x…',
+      // A caller that already pays for things through Bankr should be told
+      // where to call rather than left to find it, and a caller that does not
+      // should not be sent somewhere it has no account.
+      bankrGateway: gatewayAdvertised()
+        ? {
+            url: x402Config.gateway.url,
+            note:
+              'Bankr hosts a payment wall in front of this service. Call it there and Bankr ' +
+              'issues the 402, takes the USDC on Base and forwards the paid request here.',
+            trustedByOrigin: gatewayTrusted(),
+          }
+        : null,
     },
   };
 }
@@ -205,25 +222,6 @@ function recordSettlement(key: string, status: 'settled' | 'failed', tx: string 
 /** A failed settlement frees the authorization: the caller may retry with it. */
 function releaseAuthorization(key: string): void {
   getDb().prepare('DELETE FROM x402_authorizations WHERE nonce = ?').run(key);
-}
-
-/* ----------------------------------------------------------- service keys -- */
-
-/**
- * Constant-time match against the configured service keys.
- *
- * A length-varying comparison here leaks the key one byte at a time to
- * anything that can time a request, and this key skips payment entirely.
- */
-export function serviceKeyName(presented: string | undefined): string | null {
-  if (!presented) return null;
-  const given = Buffer.from(presented.trim(), 'utf8');
-  for (const key of x402Config.serviceKeys) {
-    const expected = Buffer.from(key.secret, 'utf8');
-    if (expected.length !== given.length) continue;
-    if (timingSafeEqual(expected, given)) return key.name;
-  }
-  return null;
 }
 
 /* ------------------------------------------------------------- the hooks -- */
@@ -346,7 +344,12 @@ export function registerX402(app: FastifyInstance): void {
       facilitator: facilitatorConfigured() ? x402Config.facilitatorUrl : null,
       asset: { address: paymentConfig.usdc, symbol: 'USDC', eip712: domain },
       perCallUsd: ROUTE_PRICES,
-      serviceKeys: x402Config.serviceKeys.length,
+      // The gateway is reported with whether this origin can actually tell a
+      // request from it apart from a forgery. An operator who forgot the
+      // shared secret finds out here rather than from a caller.
+      bankrGateway: gatewayAdvertised()
+        ? { url: x402Config.gateway.url, trustedByOrigin: gatewayTrusted() }
+        : null,
     };
   });
 
@@ -355,15 +358,18 @@ export function registerX402(app: FastifyInstance): void {
     const route = req.routeOptions?.url;
     if (!isGated(route)) return;
 
-    // 1. A handler that already collected the money in front of this origin.
-    const service = serviceKeyName(
-      (Array.isArray(req.headers[HEADER_SERVICE])
-        ? (req.headers[HEADER_SERVICE] as string[])[0]
-        : req.headers[HEADER_SERVICE]) as string | undefined,
-    );
-    if (service) {
-      reply.header('x-oracle-settled-by', service);
+    // 1. Bankr's gateway, which took the payment before the request got here.
+    const gateway = readGatewayRequest(req.headers as Record<string, unknown>);
+    if (gateway.trusted) {
+      reply.header('x-oracle-settled-by', 'bankr-gateway');
+      if (gateway.payer) reply.header('x-oracle-payer', gateway.payer);
       return;
+    }
+    if (gateway.reason !== 'not a gateway request') {
+      // Logged rather than silently 402'd: a request that looks like the
+      // gateway and is not is either a misconfiguration on the gateway or
+      // someone trying the door, and those need telling apart.
+      req.log.warn(`x402 gateway request refused: ${gateway.reason}`);
     }
 
     // 2. A pro subscriber already paid for the period. Billing them per call

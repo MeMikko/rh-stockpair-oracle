@@ -1,19 +1,23 @@
 import { facilitatorConfigured, x402Config } from '../../config/x402.js';
 
 /**
- * The facilitator, which is Bankr.
+ * The facilitator, whoever it is.
  *
  * A facilitator does the two things a resource server should not have to do
  * itself: check that a signed payment authorization is valid and will settle,
- * and submit it. Bankr runs one and pays the gas, which is what makes a
- * $0.005 call payable at all — the caller signs, nobody funds a wallet, and
- * no transaction is broadcast by this process.
+ * and submit it. Its gas, not the caller's, which is what makes a $0.005 call
+ * payable at all — the caller signs, nobody funds a wallet, and no
+ * transaction is broadcast by this process.
  *
- * The wire protocol is x402's own, not Bankr's: `POST /verify`, `POST /settle`
- * and `GET /supported`, each taking `{ x402Version, paymentPayload,
- * paymentRequirements }`. Pointing `X402_FACILITATOR_URL` at any conforming
- * facilitator therefore works, which is deliberate — a payment path with
- * exactly one possible provider is an outage waiting to be someone else's.
+ * **It is not Bankr.** Bankr's x402 product is a hosted gateway that issues
+ * its own 402 in front of this origin (see `gateway.ts`); it publishes no
+ * `/verify` or `/settle` for other people's servers. This path is for callers
+ * that pay this origin directly, and it speaks the published x402 wire
+ * protocol — `POST /verify`, `POST /settle`, `GET /supported`, each taking
+ * `{ x402Version, paymentPayload, paymentRequirements }` — so any conforming
+ * facilitator works, Coinbase's at x402.org/facilitator included. That is
+ * deliberate: a payment path with exactly one possible provider is an outage
+ * waiting to be someone else's.
  *
  * Nothing here throws into a request path. Every failure comes back as a
  * value with a reason a caller can act on, because the alternative is a 500

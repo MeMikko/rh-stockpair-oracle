@@ -205,11 +205,12 @@ of every endpoint, the access methods, the payment details and the
 limits. Also served from `GET /` when you send `Accept: application/json`, and
 advertised in a `Link: rel="service-desc"` header on every response.
 
-Four methods, all live:
+Five methods, all live:
 
 | Method | For | How |
 |---|---|---|
-| **x402, scheme `exact`** | agents, per call, no account | The published protocol, settled through Bankr's facilitator. Call a priced route with no credential → `402` whose `accepts[0]` is `exact` on `base`. Sign the EIP-3009 authorization, retry with it base64-encoded in `x-payment`. `x402-fetch` and `bankr x402 call` do this for you; the facilitator pays the gas. What this deployment accepts: `GET /x402/supported` |
+| **Bankr x402 gateway** | agents that already pay through Bankr | Call `https://x402.bankr.bot/0x4b19ee2a3de2521a3adc901989944c209c0a60ea/vates` instead of this origin. Bankr issues the 402, takes the USDC on Base, settles it and forwards the paid request here. Same routes, same responses |
+| **x402, scheme `exact`** | agents paying this origin directly | The published protocol, settled through a standard open facilitator. Call a priced route with no credential → `402` whose `accepts[0]` is `exact` on `base`. Sign the EIP-3009 authorization, retry with it base64-encoded in `x-payment`. `x402-fetch` does this for you; the facilitator pays the gas. What this deployment accepts: `GET /x402/supported` |
 | **x402, prepaid credit** | callers that would rather transfer once than sign per call | Send USDC on Base to the treasury, then `POST /x402/topup {"txHash"}`. Any amount, no minimum; each call debits its own price. Balance: `GET /x402/balance?payer=0x…` |
 | **wallet signature** | session-based | `GET /auth/nonce?address=0x…` returns the exact message to sign → `personal_sign` → `POST /auth/verify {address, signature, nonce}` → bearer token |
 | **pro** | direct answers on Farcaster, unmetered | $5.99 USDC on Base for 30 days, `POST /pro/claim {txHash}`. Does not auto-renew. `POST /pro/link-fid {fid}` links a Farcaster account |

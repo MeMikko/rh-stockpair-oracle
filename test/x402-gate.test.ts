@@ -17,7 +17,9 @@ process.env.DB_PATH = join(mkdtempSync(join(tmpdir(), 'x402-gate-')), 'test.db')
 process.env.PRICING_MODE = 'paid';
 process.env.X402_FACILITATOR_URL = 'https://facilitator.example/x402';
 process.env.X402_RESOURCE_BASE = 'https://oracle.sb4s.xyz';
-process.env.X402_SERVICE_KEYS = 'bankr-cloud:0123456789abcdef0123456789abcdef';
+process.env.VATES_BACKEND_SECRET = '0123456789abcdef0123456789abcdef';
+process.env.X402_GATEWAY_URL =
+  'https://x402.bankr.bot/0x4b19ee2a3de2521a3adc901989944c209c0a60ea/vates';
 // Pinned so the asset domain never reaches for a Base RPC that is not there.
 process.env.X402_ASSET_NAME = 'USD Coin';
 process.env.X402_ASSET_VERSION = '2';
@@ -206,24 +208,47 @@ describe('when settlement does not happen', () => {
   });
 });
 
-describe('a handler that already collected the money', () => {
-  it('is served on its service key', async () => {
+describe('a request Bankr already took the money for', () => {
+  const SECRET = '0123456789abcdef0123456789abcdef';
+  const PAYER_ADDR = '0x4b19ee2a3de2521a3adc901989944c209c0a60ea';
+
+  it('is served on the gateway secret, and says who it was served for', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/quote',
-      headers: { 'x-oracle-service-key': '0123456789abcdef0123456789abcdef' },
+      headers: { 'x-bankr-secret': SECRET, 'x-402-payer': PAYER_ADDR },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.headers['x-oracle-settled-by']).toBe('bankr-cloud');
+    expect(res.headers['x-oracle-settled-by']).toBe('bankr-gateway');
+    expect(res.headers['x-oracle-payer']).toBe(PAYER_ADDR);
   });
 
-  it('is refused on a wrong one', async () => {
+  /**
+   * The header naming the payer is a plain string. If carrying it were enough,
+   * the payment wall would be decoration -- so this is the test that matters
+   * most in the file.
+   */
+  it('is refused when only the payer header is presented', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/quote',
-      headers: { 'x-oracle-service-key': 'not-the-key-not-the-key-not-key!' },
+      headers: { 'x-402-payer': PAYER_ADDR },
     });
     expect(res.statusCode).toBe(402);
+  });
+
+  it('is refused on a wrong secret', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/quote',
+      headers: { 'x-bankr-secret': 'nope-nope-nope-nope-nope-nope-no' },
+    });
+    expect(res.statusCode).toBe(402);
+  });
+
+  it('tells a caller about the gateway in the 402 itself', async () => {
+    const res = await app.inject({ method: 'GET', url: '/quote' });
+    expect(res.json().settlement.bankrGateway.url).toContain('x402.bankr.bot');
   });
 });
 

@@ -43,10 +43,12 @@ than earn margin; see `config/pricing.ts`.
 4. **Distribution** – deployed at https://oracle.sb4s.xyz; PR to
    https://github.com/BankrBot/skills with a SKILL.md + catalog.json pending.
    The RH category in that catalog holds only `hoodmarkets` and `rhagent`.
-   x402 goes through Bankr: the API speaks scheme `exact` and settles through
-   a facilitator (`X402_FACILITATOR_URL`), and `x402/oracle` is a handler for
-   Bankr's x402 Cloud that proxies here for marketplace discovery. Charging
-   still waits on `PRICING_MODE=paid`.
+   x402 has two doors. Bankr's is a hosted **gateway** (not a facilitator, and
+   it publishes none): `x402.bankr.bot/<wallet>/vates` fronts this origin,
+   collects the USDC and forwards the request with `x-402-payer`, trusted only
+   when `x-bankr-secret` matches `VATES_BACKEND_SECRET`. Direct callers pay the
+   origin with scheme `exact` through a standard open facilitator
+   (`X402_FACILITATOR_URL`). Charging still waits on `PRICING_MODE=paid`.
 
 ## Context you should know
 - Stock tokens trade 24/5 on-chain; underlying market has hours. When the
@@ -106,7 +108,8 @@ necessary (none planned).
 2. ✅ `/prepare-swap` + `/gas`.
 3. ✅ Corporate-action calendar + public agent with approval queue.
 4. ✅ Deployment + skill package. ⬜ skills-repo PR.
-5. ⬜ Point `X402_FACILITATOR_URL` at Bankr's facilitator, confirm it with
-   `npm run x402:check`, flip `PRICING_MODE=paid`, and deploy `x402/oracle`.
+5. ⬜ Set `VATES_BACKEND_SECRET` on both sides of the Bankr gateway, point
+   `X402_FACILITATOR_URL` at a standard facilitator, confirm both with
+   `npm run x402:check`, then flip `PRICING_MODE=paid`.
 
 Target: first public post ready before the gas subsidy ends (late Sept 2026).

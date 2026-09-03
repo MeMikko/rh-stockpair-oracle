@@ -1,5 +1,5 @@
 /**
- * x402, settled through Bankr.
+ * x402: two doors, and Bankr is one of them.
  *
  * The first version of this service spoke a 402 that was x402-*shaped* and
  * said so: an ordinary USDC transfer whose hash was presented afterwards,
@@ -8,61 +8,44 @@
  * useless — no off-the-shelf x402 client could pay it, which is the entire
  * point of speaking the protocol.
  *
- * The missing piece was a facilitator: someone to check an EIP-3009
- * authorization and submit it. Bankr runs one, covers the gas, and is where
- * the callers this service is built for already are. So the `exact` scheme is
- * now real — verified and settled through whatever facilitator is configured
- * here — and the transfer-and-credit scheme stays as a second entry in the
- * same 402 for callers that already use it.
+ * There are two ways to fix that, and they are not alternatives: they answer
+ * different callers, and both are configured here.
+ *
+ *  1. **Bankr's gateway.** Bankr hosts the payment wall itself, at
+ *     `https://x402.bankr.bot/<wallet>/<service>`. It issues the 402, takes
+ *     the payment, settles on Base, and forwards the verified request here
+ *     with `x-402-payer` naming who paid. Nothing about payment happens in
+ *     this process on that path. Bankr publishes no facilitator API for
+ *     other people's servers, so this is *the* way to be paid through Bankr —
+ *     and it is also where agents that already pay through Bankr look.
+ *  2. **This origin, speaking `exact` directly.** For callers that would
+ *     rather pay `oracle.sb4s.xyz` than a gateway: the caller signs an
+ *     EIP-3009 authorization, and a standard open facilitator (Coinbase's at
+ *     https://x402.org/facilitator, or any conforming one) verifies and
+ *     submits it. `X402_FACILITATOR_URL` is that facilitator, and it is not
+ *     Bankr's — asking Bankr for a `/verify` it does not publish would 402
+ *     every caller with an error about signatures.
  *
  * **Nothing here is a guess that fails silently.** The facilitator URL has no
- * default: a wrong one would 402 every caller with an error that reads like a
- * payment problem. `npm run x402:check` asks the configured facilitator what
- * it actually supports, the same way `npm run bankr:scope` asks Bankr what a
- * key can actually do.
+ * default, and `npm run x402:check` asks whatever is configured what it
+ * actually settles — the same way `npm run bankr:scope` asks Bankr what a key
+ * can actually do, rather than trusting a memory of a dashboard toggle.
  */
 
 const env = (name: string): string => process.env[name]?.trim() ?? '';
 
-/**
- * Service keys, for a handler that has already collected the money.
- *
- * Bankr x402 Cloud hosts the handler, applies the payment layer and settles
- * on Base; the handler then calls this origin. That call is already paid for,
- * so charging it again would bill the same request twice. The key says "this
- * caller settled elsewhere", and is the only credential that skips payment
- * without a session or a signed authorization — which is why it is a shared
- * secret held by one deployment rather than anything a caller can present on
- * its own behalf.
- *
- * Format: `name:secret`, comma separated. The name is for the usage counter
- * and the logs; the secret is what is compared.
- */
-function parseServiceKeys(raw: string): Array<{ name: string; secret: string }> {
-  return raw
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      const at = entry.indexOf(':');
-      // A bare secret still works, named for what it is rather than rejected:
-      // an operator who omits the label should get a working key, not a
-      // silently ignored one.
-      if (at < 0) return { name: 'service', secret: entry };
-      return { name: entry.slice(0, at).trim() || 'service', secret: entry.slice(at + 1).trim() };
-    })
-    .filter((k) => k.secret.length >= 16);
-}
-
 export const x402Config = {
   /**
-   * Facilitator base URL. `/verify`, `/settle` and `/supported` hang off it.
-   * Empty means the `exact` scheme is not advertised at all — the 402 then
-   * carries only the transfer-and-credit scheme, and says why.
+   * Facilitator base URL for the direct `exact` path. `/verify`, `/settle`
+   * and `/supported` hang off it. Empty means the `exact` scheme is not
+   * advertised at all — the 402 then carries the credit scheme and the Bankr
+   * gateway, and says why.
+   *
+   * NOT a Bankr URL. Bankr's x402 offering is the hosted gateway below.
    */
   facilitatorUrl: env('X402_FACILITATOR_URL').replace(/\/+$/, ''),
 
-  /** Sent as `x-api-key`, the header Bankr uses everywhere else. Optional. */
+  /** Optional bearer/api key for a facilitator that requires one. */
   facilitatorKey: env('X402_FACILITATOR_KEY'),
 
   /** Network name as the facilitator names it. x402 uses slugs, not chain ids. */
@@ -90,15 +73,38 @@ export const x402Config = {
   assetName: env('X402_ASSET_NAME'),
   assetVersion: env('X402_ASSET_VERSION'),
 
-  serviceKeys: parseServiceKeys(env('X402_SERVICE_KEYS')),
+  /**
+   * Bankr's hosted payment wall in front of this origin.
+   *
+   * `url` is advertised so a caller that pays through Bankr is told where to
+   * call instead of being left to find it in a catalogue. It is documentation
+   * only — this process never calls it.
+   *
+   * `secret` is the shared secret Bankr sends as `x-bankr-secret`, set as
+   * VATES_BACKEND_SECRET on the gateway. It is what makes the gateway's
+   * `x-402-payer` header *evidence* rather than a claim: without it, anyone
+   * could set that header and walk through the payment wall, so a gateway
+   * request without a matching secret is treated as unpaid. Leaving it empty
+   * is therefore a decision to have no trusted gateway path, not a
+   * convenience.
+   */
+  gateway: {
+    url: env('X402_GATEWAY_URL'),
+    secret: env('VATES_BACKEND_SECRET') || env('X402_GATEWAY_SECRET'),
+  },
 } as const;
 
 export function facilitatorConfigured(): boolean {
   return /^https?:\/\//.test(x402Config.facilitatorUrl);
 }
 
-export function serviceKeysConfigured(): boolean {
-  return x402Config.serviceKeys.length > 0;
+/** Whether a request from Bankr's gateway can be told apart from a forgery. */
+export function gatewayTrusted(): boolean {
+  return x402Config.gateway.secret.length >= 16;
+}
+
+export function gatewayAdvertised(): boolean {
+  return /^https?:\/\//.test(x402Config.gateway.url);
 }
 
 /** Absolute URL a payment is bound to, so it cannot be replayed elsewhere. */

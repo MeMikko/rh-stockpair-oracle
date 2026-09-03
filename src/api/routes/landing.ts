@@ -476,16 +476,20 @@ x-oracle-charged-usd: 0      what it cost you today
 x-oracle-pricing: ${esc(pricingMode)}     the current mode</code></pre>
 
 <h2>Access and payment</h2>
-<p>Four ways in, all live today. In <strong>${esc(pricingMode)} mode</strong> none is required
+<p>Five ways in, all live today. In <strong>${esc(pricingMode)} mode</strong> none is required
 yet — every route is served without charge — but each already works, and the machine-readable
 description at <code>/.well-known/agent.json</code> carries the details.</p>
 <table>
 <tr><th>Method</th><th>For</th><th>How</th></tr>
-<tr><td><code>x402</code>, scheme <code>exact</code></td><td>agents, per call, no account</td>
-<td>The published protocol, settled through Bankr's facilitator: call a priced route with no
-credential → <code>402</code> listing what to pay, sign an EIP-3009 authorization, retry with it
-base64-encoded in <code>x-payment</code>. Any standard client — <code>x402-fetch</code>,
-<code>bankr x402 call</code> — already does this. The facilitator pays the gas.</td></tr>
+<tr><td>Bankr x402 gateway</td><td>agents that already pay through Bankr</td>
+<td>Call the service at Bankr's URL instead of here. Bankr issues the 402, takes the USDC on Base
+and forwards the paid request to this origin. Same routes, same responses; the payment is between
+you and Bankr. The address is in <code>/.well-known/agent.json</code>.</td></tr>
+<tr><td><code>x402</code>, scheme <code>exact</code></td><td>agents paying this origin directly</td>
+<td>The published protocol: call a priced route with no credential → <code>402</code> listing what
+to pay, sign an EIP-3009 authorization, retry with it base64-encoded in <code>x-payment</code>.
+Any standard client — <code>x402-fetch</code> — already does this, and the facilitator pays the
+gas.</td></tr>
 <tr><td><code>x402</code>, prepaid credit</td><td>callers that would rather transfer once</td>
 <td>Send USDC on Base to the treasury and <code>POST /x402/topup {"txHash"}</code>. Any amount, no
 minimum; each call debits its own price. Balance: <code>GET /x402/balance?payer=0x…</code>.</td></tr>

@@ -3,7 +3,9 @@ import { ROUTE_PRICES, pricingMode } from '../../../config/pricing.js';
 import { paymentConfig, priceUnits, PAYMENT_CHAIN_ID, formatUsdc } from '../../../config/payments.js';
 import { agentIdentity } from '../../../config/agent.js';
 import { authConfigured } from '../../auth/session.js';
-import { facilitatorConfigured, x402Config } from '../../../config/x402.js';
+import {
+  facilitatorConfigured, gatewayAdvertised, gatewayTrusted, x402Config,
+} from '../../../config/x402.js';
 
 /**
  * A machine-readable description of this service.
@@ -84,6 +86,27 @@ export function serviceDescriptor(): Record<string, unknown> {
             'The methods below already work and will be required when billing is enabled.'
           : 'Billing is enabled. Use one of the methods below.',
       methods: [
+        // First, because it is the door most callers already have an account
+        // for -- and the only one where somebody else does the settling.
+        ...(gatewayAdvertised()
+          ? [
+              {
+                id: 'bankr-x402-gateway',
+                for: 'agents that already pay for things through Bankr',
+                available: gatewayTrusted(),
+                url: x402Config.gateway.url,
+                how:
+                  'Call this service at the Bankr URL above instead of here. Bankr issues the ' +
+                  '402, takes the USDC on Base, settles it, and forwards the paid request to ' +
+                  'this origin with the payer’s address. Same routes, same responses; the ' +
+                  'payment is between you and Bankr.',
+                note: gatewayTrusted()
+                  ? 'Requests forwarded by the gateway are authenticated with a shared secret.'
+                  : 'The gateway is published but this origin cannot yet authenticate its ' +
+                    'requests, so they are treated as unpaid once billing is on.',
+              },
+            ]
+          : []),
         {
           id: 'x402-exact',
           for: 'agents, per call, no account — the published protocol',
@@ -92,9 +115,9 @@ export function serviceDescriptor(): Record<string, unknown> {
             'Call a priced route with no credential to receive HTTP 402. `accepts` carries a ' +
             'standard x402 `exact` requirement: sign an EIP-3009 authorization for the amount ' +
             'and resource it names, base64-encode the payment payload, and retry with it in ' +
-            'the `X-PAYMENT` header. It is verified and settled through a facilitator, which ' +
-            'pays the gas — x402-fetch and `bankr x402 call` do all of this unchanged. The ' +
-            'settlement transaction comes back in `X-PAYMENT-RESPONSE`.',
+            'the `X-PAYMENT` header. It is verified and settled through a standard facilitator, ' +
+            'which pays the gas — x402-fetch does all of this unchanged. The settlement ' +
+            'transaction comes back in `X-PAYMENT-RESPONSE`.',
           facilitator: facilitatorConfigured() ? x402Config.facilitatorUrl : null,
           network: x402Config.network,
           supported: 'GET /x402/supported',
@@ -156,6 +179,9 @@ export function serviceDescriptor(): Record<string, unknown> {
         version: 1,
         schemes: facilitatorConfigured() ? ['exact', 'onchain-transfer-credit'] : ['onchain-transfer-credit'],
         facilitator: facilitatorConfigured() ? x402Config.facilitatorUrl : null,
+        bankrGateway: gatewayAdvertised()
+          ? { url: x402Config.gateway.url, trustedByOrigin: gatewayTrusted() }
+          : null,
         supported: 'GET /x402/supported',
       },
     },
