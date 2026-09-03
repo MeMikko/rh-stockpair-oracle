@@ -14,6 +14,7 @@ import {
   type PaymentPayload, type PaymentRequirements,
 } from '../payments/facilitator.js';
 import { readGatewayRequest } from '../payments/gateway.js';
+import { exactSettlement, refreshSettlement } from '../payments/settleable.js';
 import { tierForSession } from '../auth/session.js';
 
 /**
@@ -91,7 +92,10 @@ export function requirementsFor(route: string, domain: AssetDomain): PaymentRequ
   const units = priceUnitsFor(route);
   const out: PaymentRequirements[] = [];
 
-  if (facilitatorConfigured()) {
+  // Not `is a facilitator configured` -- `will that facilitator settle this`.
+  // A URL in the environment is a claim; /supported is the answer. See
+  // src/payments/settleable.ts.
+  if (exactSettlement().advertise) {
     out.push({
       scheme: 'exact',
       network: x402Config.network,
@@ -152,8 +156,9 @@ export function payment402Body(route: string, domain: AssetDomain) {
         ? 'scheme `exact`: sign an EIP-3009 authorization, send it base64-encoded in the ' +
           'X-PAYMENT header (PAYMENT-SIGNATURE is read too), and it is verified and settled ' +
           'through the facilitator above. Gas is the facilitator’s, not yours.'
-        : 'No facilitator is configured on this deployment, so the `exact` scheme is not ' +
-          'offered. Pay through the Bankr gateway below, or use the credit scheme.',
+        : 'The `exact` scheme is not offered here: ' + exactSettlement().reason +
+          '. Pay through the Bankr gateway below, or use the credit scheme — both work. ' +
+          'Nothing was withheld from you; the door simply is not there to open.',
       // The alternative, said explicitly because it is the part that differs
       // from a naive reading of x402.
       creditScheme: LEGACY_SCHEME,
@@ -305,6 +310,12 @@ declare module 'fastify' {
 }
 
 export function registerX402(app: FastifyInstance): void {
+  // Ask the facilitator once at boot rather than on the first caller's 402.
+  // Fire-and-forget on purpose: registration must not depend on a third party
+  // being up, and a failed probe is a verdict (do not advertise) rather than a
+  // failure to start.
+  void refreshSettlement();
+
   app.get('/x402/balance', async (req, reply) => {
     const payer = (req.query as { payer?: string } | undefined)?.payer?.trim();
     if (!payer || !/^0x[0-9a-fA-F]{40}$/.test(payer)) {
@@ -350,12 +361,29 @@ export function registerX402(app: FastifyInstance): void {
   /** What this deployment will actually accept, without having to fail first. */
   app.get('/x402/supported', async () => {
     const domain = await assetDomain();
+    // First caller waits for one probe so the answer is measured rather than
+    // "not yet known"; everyone after reads the cache.
+    if (facilitatorConfigured() && exactSettlement().checkedAt === null) {
+      await refreshSettlement();
+    }
+    const settlement = exactSettlement();
     return {
       pricingMode,
       x402Version: X402_VERSION,
       schemes: requirementsFor('/quote', domain).map((r) => r.scheme),
       network: x402Config.network,
       facilitator: facilitatorConfigured() ? x402Config.facilitatorUrl : null,
+      // Whether that facilitator settles what this service advertises, asked
+      // rather than assumed. An operator who pointed the URL at a testnet-only
+      // facilitator reads it here instead of hearing it from a caller whose
+      // signature was refused.
+      exactSettlement: {
+        advertised: settlement.advertise,
+        reason: settlement.reason,
+        checkedAt: settlement.checkedAt === null
+          ? null
+          : new Date(settlement.checkedAt).toISOString(),
+      },
       asset: { address: paymentConfig.usdc, symbol: 'USDC', eip712: domain },
       perCallUsd: ROUTE_PRICES,
       // The gateway is reported with whether this origin can actually tell a
@@ -416,8 +444,14 @@ export function registerX402(app: FastifyInstance): void {
         (r) => r.scheme === presented.payload.scheme,
       );
       if (!requirements || requirements.scheme === LEGACY_SCHEME) {
+        // Most often this is `exact` arriving at a deployment whose facilitator
+        // cannot settle it. Saying which is the difference between a caller
+        // retrying forever and one switching to a scheme that works.
         return refuse(
-          { detail: `scheme ${presented.payload.scheme} is not accepted here` },
+          {
+            detail: `scheme ${presented.payload.scheme} is not accepted here`,
+            why: presented.payload.scheme === 'exact' ? exactSettlement().reason : undefined,
+          },
           'unsupported payment scheme',
         );
       }

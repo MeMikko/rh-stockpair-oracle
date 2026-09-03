@@ -203,11 +203,33 @@ export async function facilitatorSupported(): Promise<SupportedKind[]> {
   return Array.isArray(body) ? body : (body.kinds ?? []);
 }
 
+/**
+ * One network under its several names.
+ *
+ * A facilitator may name a chain either way, and the same one names it both:
+ * x402.org's `/supported` lists base-sepolia as `eip155:84532` under x402 v2
+ * and as `base-sepolia` under v1. Comparing the strings would make a
+ * facilitator that does settle on Base look like one that does not, purely
+ * because it spelled the chain in CAIP-2 -- and this service would then hide a
+ * door that works. Unknown names are left alone and compared exactly.
+ */
+const NETWORK_ALIASES: Record<string, string> = {
+  base: 'eip155:8453',
+  'base-mainnet': 'eip155:8453',
+  'base-sepolia': 'eip155:84532',
+};
+
+function canonicalNetwork(network: string): string {
+  const n = network.trim().toLowerCase();
+  return NETWORK_ALIASES[n] ?? n;
+}
+
 /** Does the configured facilitator settle what this service advertises? */
 export function supports(kinds: SupportedKind[], scheme: string, network: string): boolean {
+  const want = canonicalNetwork(network);
   return kinds.some(
     (k) =>
-      (k.scheme ?? '').toLowerCase() === scheme &&
-      (k.network ?? '').toLowerCase() === network.toLowerCase(),
+      (k.scheme ?? '').toLowerCase() === scheme.toLowerCase() &&
+      canonicalNetwork(k.network ?? '') === want,
   );
 }
