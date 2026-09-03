@@ -389,6 +389,33 @@ a salted hash of the remote address. The raw address is never stored — this is
 a usage counter, not a visitor log — and the per-install salt means hashes are
 not comparable across deployments.
 
+## The page a person gets
+
+`GET /` is server-rendered from live counts — the numbers are the product, and
+a figure that might be a screenshot from last month is worth less than none.
+An agent that sends `Accept: application/json` gets the service descriptor
+instead.
+
+The look is built from the agent's own logo: navy plate, silver and cyan
+blades, the ringed eye, the spark above it. The mark is redrawn as inline SVG
+(`/mark.svg`, also the favicon) rather than pasted in as a raster, so it stays
+crisp at 34px and costs nothing per request; the original image is served at
+`/logo.jpg` for social previews and the iOS home screen, which is the one
+place a raster is what the consumer wants. Dark is the native theme because
+the logo has a night sky in it, and the light theme is the same identity in
+ice rather than a second design. No external script, font or stylesheet — the
+page cannot break behind a CDN and cannot leak a visitor to a third party.
+
+**The wallet is one control, not five.** Connect, sign in, pay, paste a hash
+and claim used to be five buttons a visitor had to sequence themselves. There
+is only ever one next step, so there is one button and its label *is* that
+step; paying then claims itself by polling, because a claim only fails for the
+few seconds the transfer takes to confirm. The manual hash box is folded away
+for someone who paid from another wallet, and the Farcaster FID row appears
+only once pro is live — an input that cannot do anything yet is worse than one
+that is not there. Tables become cards under 680px and every control clears a
+42px touch target.
+
 ## Finding out what this is, as a machine
 
 `GET /.well-known/agent.json` describes every endpoint, all three access
