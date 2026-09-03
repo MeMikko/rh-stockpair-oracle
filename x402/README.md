@@ -42,10 +42,54 @@ bankr x402 schema https://x402.bankr.bot/0x4b19…60ea/vates
 bankr x402 call   https://x402.bankr.bot/0x4b19…60ea/vates -i
 ```
 
-## One endpoint, one route parameter
+## What is actually deployed, measured 2026-09-03
 
-Bankr addresses one endpoint rather than a path space, so the oracle route
-travels as a query parameter:
+The gateway live at that URL is **not** the handler in this directory. It is a
+path-preserving reverse proxy with a 402 in front of the whole path space:
+
+```
+$ curl -si https://x402.bankr.bot/0x4b19…60ea/vates/health
+HTTP/2 402
+{"x402Version":2,"accepts":[{"scheme":"exact","network":"eip155:8453",
+  "maxAmountRequired":"20000","amount":"20000",
+  "resource":"https://x402.bankr.bot/0x4b19…60ea/vates/health",
+  "payTo":"0x8AEE…01a0","asset":"0x8335…2913"}],
+ "facilitator":"https://api.bankr.bot/facilitator"}
+```
+
+Four things follow, and none of them were assumptions before this was run:
+
+- **Routes travel as paths, not as `?route=`.** `…/vates/quote?pool=0x…` is the
+  call. Every origin route is reachable under its own path, unchanged.
+- **The price is already $0.02** (20000 base units), matching the origin.
+- **It speaks x402 v2 and names Base in CAIP-2** (`eip155:8453`), where the
+  origin's own door speaks v1 and `base`. Both are correct; they are different
+  doors. It settles through `api.bankr.bot/facilitator`, which is Bankr's
+  facilitator for Bankr's own endpoints and publishes no `/supported` (404 —
+  see `.env.example`), so it is not a candidate for the origin's direct door.
+- **`payTo` is Bankr's address**, not this service's treasury. Bankr collects
+  and pays out to the wallet named in the gateway URL.
+
+### The free routes are charged there, and cannot be un-charged here
+
+`…/vates/health` and `…/vates/coverage` cost $0.02 through the gateway. This
+origin cannot prevent it: Bankr settles before the request arrives, and there
+is nothing here to refund. Excluding those two paths is a change on Bankr's
+side, and until it is made, the honest thing is to say so — which is why the
+skill and the catalogue now name the free direct URLs, and why a free route
+reached through the gateway answers with
+
+```
+x-oracle-free-at-origin: https://oracle.sb4s.xyz/health
+```
+
+so a caller pays for that answer once rather than every time.
+
+## The handler in this directory, and when it applies
+
+`x402/vates/index.ts` and `bankr.x402.json` target `bankr x402 deploy` — Bankr
+x402 Cloud, where Bankr hosts the code itself and addresses **one endpoint**
+rather than a path space. There the route travels as a query parameter:
 
 ```
 ?route=/quote&pool=0x…&size=1000
@@ -53,7 +97,13 @@ travels as a query parameter:
 ?route=/ask            (POST, body {"question": "…"})
 ```
 
-Anything not in the handler's allowlist is refused before the origin is called.
+Anything not in the handler's allowlist is refused before the origin is called,
+and `/health` and `/coverage` are refused for free with the direct URL instead.
+
+That carve-out is real code and it works — but it does not run today, because
+the gateway in front of this service is the proxy above, not this handler. Kept
+because it is the shape the Cloud product takes and the two are one `bankr
+x402 deploy` apart; not kept as a description of what is live.
 
 ## The shared secret, and why it is not optional here
 

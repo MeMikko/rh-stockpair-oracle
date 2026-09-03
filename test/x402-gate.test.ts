@@ -74,6 +74,8 @@ function build() {
   // A route that fails after payment was verified, to prove nothing is
   // settled for a response the caller never got.
   app.get('/gas', async (_req, reply) => reply.code(500).send({ error: 'upstream' }));
+  // Free here, and charged for by the gateway in front of this origin.
+  app.get('/health', async () => ({ ok: true }));
   return app;
 }
 
@@ -284,6 +286,57 @@ describe('a request Bankr already took the money for', () => {
   it('tells a caller about the gateway in the 402 itself', async () => {
     const res = await app.inject({ method: 'GET', url: '/quote' });
     expect(res.json().settlement.bankrGateway.url).toContain('x402.bankr.bot');
+  });
+});
+
+/**
+ * The gateway deployed in front of this origin is a path-preserving proxy with
+ * its 402 over the whole path space, so it charges $0.02 for the two routes
+ * this service gives away. Nothing here can refund that -- Bankr settles before
+ * the request arrives. What is in reach is making sure the caller pays for that
+ * answer once instead of every time.
+ */
+describe('a free route reached through the gateway', () => {
+  const app = build();
+  const SECRET = '0123456789abcdef0123456789abcdef';
+  const PAYER_ADDR = '0x4b19ee2a3de2521a3adc901989944c209c0a60ea';
+
+  it('names the URL where the same answer is free', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { 'x-bankr-secret': SECRET, 'x-402-payer': PAYER_ADDR },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-oracle-free-at-origin']).toBe('https://oracle.sb4s.xyz/health');
+  });
+
+  /** Nothing to say to a caller who came here directly: they paid nothing. */
+  it('says nothing to a caller who did not come through the gateway', async () => {
+    const res = await app.inject({ method: 'GET', url: '/health' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-oracle-free-at-origin']).toBeUndefined();
+  });
+
+  /** A forged secret is not a gateway request, here as everywhere else. */
+  it('says nothing to a forged gateway request', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { 'x-bankr-secret': 'nope-nope-nope-nope-nope-nope-no' },
+    });
+    expect(res.headers['x-oracle-free-at-origin']).toBeUndefined();
+  });
+
+  /** The priced routes are unaffected: the header is about free ones only. */
+  it('does not appear on a priced route', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/quote',
+      headers: { 'x-bankr-secret': SECRET, 'x-402-payer': PAYER_ADDR },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-oracle-free-at-origin']).toBeUndefined();
   });
 });
 
