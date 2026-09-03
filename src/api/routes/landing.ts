@@ -476,14 +476,19 @@ x-oracle-charged-usd: 0      what it cost you today
 x-oracle-pricing: ${esc(pricingMode)}     the current mode</code></pre>
 
 <h2>Access and payment</h2>
-<p>Three ways in, all live today. In <strong>${esc(pricingMode)} mode</strong> none is required
+<p>Four ways in, all live today. In <strong>${esc(pricingMode)} mode</strong> none is required
 yet — every route is served without charge — but each already works, and the machine-readable
 description at <code>/.well-known/agent.json</code> carries the details.</p>
 <table>
 <tr><th>Method</th><th>For</th><th>How</th></tr>
-<tr><td><code>x402</code></td><td>agents, per call, no account</td>
-<td>Call a priced route with no credential → <code>402</code> with what to pay and where. Pay, then
-retry with <code>x-payment: &lt;tx hash&gt;</code>. The transfer becomes prepaid credit.</td></tr>
+<tr><td><code>x402</code>, scheme <code>exact</code></td><td>agents, per call, no account</td>
+<td>The published protocol, settled through Bankr's facilitator: call a priced route with no
+credential → <code>402</code> listing what to pay, sign an EIP-3009 authorization, retry with it
+base64-encoded in <code>x-payment</code>. Any standard client — <code>x402-fetch</code>,
+<code>bankr x402 call</code> — already does this. The facilitator pays the gas.</td></tr>
+<tr><td><code>x402</code>, prepaid credit</td><td>callers that would rather transfer once</td>
+<td>Send USDC on Base to the treasury and <code>POST /x402/topup {"txHash"}</code>. Any amount, no
+minimum; each call debits its own price. Balance: <code>GET /x402/balance?payer=0x…</code>.</td></tr>
 <tr><td>wallet signature</td><td>session-based access</td>
 <td><code>GET /auth/nonce</code> → sign → <code>POST /auth/verify</code> → bearer token.</td></tr>
 <tr><td>pro</td><td>Farcaster answers + unmetered</td>

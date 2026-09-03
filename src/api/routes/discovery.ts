@@ -3,6 +3,7 @@ import { ROUTE_PRICES, pricingMode } from '../../../config/pricing.js';
 import { paymentConfig, priceUnits, PAYMENT_CHAIN_ID, formatUsdc } from '../../../config/payments.js';
 import { agentIdentity } from '../../../config/agent.js';
 import { authConfigured } from '../../auth/session.js';
+import { facilitatorConfigured, x402Config } from '../../../config/x402.js';
 
 /**
  * A machine-readable description of this service.
@@ -47,6 +48,9 @@ export function serviceDescriptor(): Record<string, unknown> {
       'GET /quote?pool=&size=': 'implied USD, depth, price impact, Chainlink deviation, market hours',
       'POST /prepare-swap': 'unsigned UniversalRouter calldata with a min-out from the quoter',
       'POST /ask': 'free-text question; returns facts and a reproduce call',
+      'GET /x402/supported': 'which payment schemes and network this deployment settles',
+      'POST /x402/topup': 'turn a USDC transfer into prepaid credit: {"txHash": "0x…"}',
+      'GET /x402/balance?payer=': 'prepaid credit remaining for an address',
     },
 
     /**
@@ -81,15 +85,39 @@ export function serviceDescriptor(): Record<string, unknown> {
           : 'Billing is enabled. Use one of the methods below.',
       methods: [
         {
-          id: 'x402',
-          for: 'agents, per call, no account',
+          id: 'x402-exact',
+          for: 'agents, per call, no account — the published protocol',
+          available: facilitatorConfigured(),
           how:
-            'Call a priced route with no credential to receive HTTP 402. The body carries the ' +
-            'chain, asset, amount and address. Send USDC on Base to the treasury, then retry ' +
-            'with header `x-payment: <transaction hash>`. The full amount becomes prepaid ' +
-            'credit and each call debits its own price; a transfer costs more than one call is ' +
-            'worth, so one transfer funds many.',
+            'Call a priced route with no credential to receive HTTP 402. `accepts` carries a ' +
+            'standard x402 `exact` requirement: sign an EIP-3009 authorization for the amount ' +
+            'and resource it names, base64-encode the payment payload, and retry with it in ' +
+            'the `X-PAYMENT` header. It is verified and settled through a facilitator, which ' +
+            'pays the gas — x402-fetch and `bankr x402 call` do all of this unchanged. The ' +
+            'settlement transaction comes back in `X-PAYMENT-RESPONSE`.',
+          facilitator: facilitatorConfigured() ? x402Config.facilitatorUrl : null,
+          network: x402Config.network,
+          supported: 'GET /x402/supported',
+          header: 'x-payment',
+          // Said rather than left to be discovered: a deployment with no
+          // facilitator still answers 402, and a client that has signed an
+          // authorization deserves to know it will not be read.
+          note: facilitatorConfigured()
+            ? undefined
+            : 'No facilitator is configured on this deployment; use x402-credit below.',
+        },
+        {
+          id: 'x402-credit',
+          for: 'callers that would rather transfer once than sign per call',
+          how:
+            'Send USDC on Base to the treasury, then POST the hash to /x402/topup. The full ' +
+            'amount becomes prepaid credit — any amount, no minimum — and each call debits its ' +
+            'own price. Draw on it with header `x-payment: <your address>`. Sending the ' +
+            'transaction hash in that header works too and tops up on first use. This is not ' +
+            'the x402 `exact` scheme and is named `onchain-transfer-credit` so a standard ' +
+            'client fails cleanly rather than signing something nobody reads.',
           balance: 'GET /x402/balance?payer=0x…',
+          topUp: 'POST /x402/topup {"txHash": "0x…"}',
           header: 'x-payment',
         },
         {
@@ -116,11 +144,20 @@ export function serviceDescriptor(): Record<string, unknown> {
     payment: {
       chain: 'base',
       chainId: PAYMENT_CHAIN_ID,
+      network: x402Config.network,
       asset: paymentConfig.usdc,
       assetSymbol: 'USDC',
       assetDecimals: paymentConfig.usdcDecimals,
       payTo: paymentConfig.treasury,
+      // Applies to the transfer-and-credit path only. An `exact` payment is
+      // settled by the facilitator, which decides its own confirmation rule.
       confirmations: paymentConfig.confirmations,
+      x402: {
+        version: 1,
+        schemes: facilitatorConfigured() ? ['exact', 'onchain-transfer-credit'] : ['onchain-transfer-credit'],
+        facilitator: facilitatorConfigured() ? x402Config.facilitatorUrl : null,
+        supported: 'GET /x402/supported',
+      },
     },
 
     pricing: {

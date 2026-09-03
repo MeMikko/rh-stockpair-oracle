@@ -33,7 +33,8 @@
     "secrets": "node --import tsx scripts/secrets.ts",
     "diagnose": "node --env-file-if-exists=.env --import tsx scripts/diagnose-mention.ts",
     "admin": "node --env-file-if-exists=.env --env-file-if-exists=.env.admin --import tsx scripts/admin.ts",
-    "bankr:scope": "node --env-file-if-exists=.env --env-file-if-exists=.env.admin --import tsx scripts/bankr-scope.ts"
+    "bankr:scope": "node --env-file-if-exists=.env --env-file-if-exists=.env.admin --import tsx scripts/bankr-scope.ts",
+    "x402:check": "node --env-file-if-exists=.env --import tsx scripts/x402-check.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",

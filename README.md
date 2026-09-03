@@ -307,7 +307,10 @@ answer is skipped rather than answered with a shrug.
 - [x] Phase 4 — pricing published per response, usage accounting
 - [x] Phase 4 — deployed to oracle.sb4s.xyz
 - [ ] Phase 4 — open the skills-repo PR
-- [ ] Wire an actual payment path (x402 or key-based) and flip `PRICING_MODE=paid`
+- [x] Speak real x402: scheme `exact`, verified and settled through a facilitator
+- [ ] Point `X402_FACILITATOR_URL` at Bankr's facilitator, confirm with
+      `npm run x402:check`, and flip `PRICING_MODE=paid`
+- [ ] Deploy `x402/oracle` to Bankr x402 Cloud for marketplace discovery
 
 ## Pricing
 
@@ -361,20 +364,60 @@ page does not exist for the callers this service is built for.
 
 ## Pro, and paying per call
 
-**The 402 is x402-shaped but not x402-compatible, and says so.** In the
-published protocol, scheme `exact` means a signed EIP-3009 authorization in a
-PAYMENT-SIGNATURE header that a facilitator submits. Ours is an ordinary
-on-chain transfer whose hash is presented afterwards — same intent, different
-wire protocol. It was advertised as `exact`, which would have made a standard
-client (x402-fetch, `bankr x402 call`) sign an authorization we never read and
-loop on the retry. The scheme is now named `onchain-transfer-credit` and the
-body carries `standardX402: false`, so an incompatible client fails on the
-first call with a readable reason.
+**The 402 now speaks the published protocol, settled through Bankr.** It used
+to be x402-*shaped* and said so: an ordinary transfer whose hash was presented
+afterwards, honestly named `onchain-transfer-credit` so a standard client would
+fail cleanly rather than sign an authorization nobody read. Honest, and
+useless — no off-the-shelf client could pay it, which is the entire point of
+speaking the protocol.
 
-Supporting real x402 means either verifying EIP-3009 signatures and settling
-through a facilitator, or publishing a thin handler on Bankr's x402 Cloud that
-proxies to this service. The second is the smaller job and also buys
-marketplace discovery; neither is done.
+The missing piece was a facilitator: someone to check an EIP-3009
+authorization and submit it. Bankr runs one and covers the gas. So `accepts[0]`
+is now a real `exact` requirement on `base`, and `x402-fetch`,
+`bankr x402 call` and an app's `bankr.x402.fetch` pay this service unchanged.
+
+```
+GET /quote            → 402  { accepts: [ {scheme:"exact", …}, {scheme:"onchain-transfer-credit", …} ] }
+   sign the authorization, base64 it into X-PAYMENT, retry
+GET /quote            → 200  X-PAYMENT-RESPONSE: <base64 receipt with the settlement tx>
+```
+
+Three properties are worth stating because each is a decision:
+
+- **Verified before the work, settled after it.** Settling first charges for a
+  response that may then fail; settling after sending leaves nothing to tell
+  the caller with when settlement is refused. A refusal replaces the built
+  response with a 402, so unpaid work is never served.
+- **An authorization buys exactly one response.** EIP-3009 nonces are
+  single-use on-chain, but between verify and settle the same authorization
+  could otherwise buy two responses and pay for one. The nonce is claimed
+  locally first, and released again if settlement fails so the caller can
+  retry with the same signature.
+- **A facilitator that is down is a 503, never a 402.** Telling a caller to pay
+  again for a payment that may be perfectly good is the one answer that must
+  not be given.
+
+The EIP-712 domain a payer signs against is read off the USDC contract
+(`name()`, `version()`) rather than remembered, because a wrong domain produces
+a valid signature for a domain that does not exist and an error message about
+nothing. `npm run x402:check` asks the configured facilitator what it will
+actually settle — the same idea as `npm run bankr:scope`, and for the same
+reason: configuration is a belief until something asks.
+
+**The credit scheme stays**, for callers that would rather move USDC once than
+sign per call. `POST /x402/topup {txHash}` credits the exact base units
+transferred, with no minimum. It used to run through the subscription claim,
+which was wrong in both directions at once: a $1 transfer was refused for being
+under the $5.99 subscription price and bought nothing, while a $6 transfer
+silently granted a 30-day unmetered subscription to someone who meant to buy a
+dollar of calls. One transaction now buys one thing, and `purpose` on the
+payments row is what makes that true rather than hoped for.
+
+**Discovery is the other half, and is a deployment step.** `x402/oracle` is a
+handler for Bankr's x402 Cloud that forwards to this origin, so an agent that
+pays for things through Bankr finds the endpoint in Bankr's catalogue without
+ever having heard of `oracle.sb4s.xyz`. It presents `x-oracle-service-key`,
+which tells the origin the money was already collected; see `x402/README.md`.
 
 Two surfaces, two shapes, because they are genuinely different problems.
 
@@ -403,10 +446,9 @@ payment is how a subscription quietly becomes free.
 
 **x402 — pay per call, no account.** An agent that found this in a catalogue
 calls, gets a 402 describing exactly what to pay and where, pays, and calls
-again. Settlement is prepaid credit rather than one transfer per request: a
-USDC transfer costs more in gas and latency than a $0.005 call is worth, so a
-transfer buys a balance that calls draw down. The 402 says so in its own body
-rather than only here.
+again. `GET /x402/supported` says which schemes and network this deployment
+actually settles, so a client can find out before signing rather than after
+being refused.
 
 Off while `PRICING_MODE=launch` — every route is served and the 402 never
 fires, while the price headers say what it will cost.

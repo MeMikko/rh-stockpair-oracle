@@ -55,6 +55,13 @@ function migrate(db: DatabaseSync): void {
   if (!columns('posts').has('reply_to')) {
     db.exec('ALTER TABLE posts ADD COLUMN reply_to TEXT');
   }
+
+  // Rows written before x402 credit existed were all subscription payments,
+  // which is exactly what the column default says, so the backfill is the
+  // default and no UPDATE is needed.
+  if (!columns('payments').has('purpose')) {
+    db.exec("ALTER TABLE payments ADD COLUMN purpose TEXT NOT NULL DEFAULT 'pro'");
+  }
 }
 
 export function getCursor(stream: string): number | null {

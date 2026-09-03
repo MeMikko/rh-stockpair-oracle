@@ -54,7 +54,14 @@ function clientIp(req: { headers: Record<string, unknown>; ip: string }): string
   return value.split(',')[0]!.trim();
 }
 
-function callerId(apiKey: string | undefined, ip: string): string {
+function callerId(apiKey: string | undefined, serviceKey: string | undefined, ip: string): string {
+  // A paid handler in front of this origin -- Bankr x402 Cloud -- is one
+  // caller in the counter, not thousands of edge addresses. Counting its
+  // traffic as its own line is the only way to see how much of the demand
+  // arrives through the marketplace rather than direct.
+  if (serviceKey) {
+    return `svc:${createHash('sha256').update(serviceKey).digest('hex').slice(0, 16)}`;
+  }
   if (apiKey) return `key:${createHash('sha256').update(apiKey).digest('hex').slice(0, 16)}`;
   return `ip:${createHash('sha256').update(SALT + ip).digest('hex').slice(0, 16)}`;
 }
@@ -96,14 +103,20 @@ export function registerMetering(app: FastifyInstance): void {
     // 30s and counting it would swamp the numbers the pricing decision needs.
     if (!route || priceFor(route) === null || route === '/health') return;
     if (reply.statusCode >= 500) return;
+    // A call that was refused for want of payment was not served, and the
+    // pricing decision reads these counts as demand that was met. Counting a
+    // 402 makes every unpaid retry look like a customer.
+    if (reply.statusCode === 401 || reply.statusCode === 402 || reply.statusCode === 429) return;
 
     try {
       const key = req.headers['x-api-key'];
+      const service = req.headers['x-oracle-service-key'];
       record.run(
         dayOf(Date.now()),
         route,
         callerId(
           typeof key === 'string' ? key : undefined,
+          typeof service === 'string' ? service : undefined,
           clientIp(req as unknown as { headers: Record<string, unknown>; ip: string }),
         ),
         Date.now(),

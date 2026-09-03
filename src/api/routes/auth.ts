@@ -32,7 +32,11 @@ function tokenFrom(req: { headers: Record<string, unknown> }): string | undefine
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) return auth.slice(7).trim();
   const cookie = req.headers.cookie;
   if (typeof cookie !== 'string') return undefined;
-  const m = cookie.match(new RegExp(`(?:^|;\s*)${COOKIE}=([^;]+)`));
+  // Built from a RegExp source string, not a template literal with \s in it:
+  // inside a template literal `\s` is just `s`, so the pattern read
+  // ";s*oracle_session=" and matched only a cookie that was first in the
+  // header. Everyone signed in with a second cookie present looked signed out.
+  const m = cookie.match(new RegExp('(?:^|;\\s*)' + COOKIE + '=([^;]+)'));
   return m ? m[1] : undefined;
 }
 

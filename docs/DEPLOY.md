@@ -146,6 +146,26 @@ is real rather than assumed — the flags live in someone else's dashboard:
 sudo -u oracle npm run bankr:scope     # asks Bankr what each key can do
 ```
 
+### Turning payment on
+
+`PRICING_MODE=paid` is what starts charging; before flipping it, set
+`X402_FACILITATOR_URL` to Bankr's facilitator and confirm it settles what this
+service advertises. The same principle as `bankr:scope`: the configuration is
+a belief until something asks.
+
+```bash
+sudo -u oracle npm run x402:check      # what the facilitator actually supports
+```
+
+A green check means a standard client — `x402-fetch`, `bankr x402 call` — can
+pay per call. A red one means every priced call would answer 402 with an error
+about signatures, which reads to the caller as their problem rather than ours.
+
+`X402_SERVICE_KEYS` is only needed if the Bankr x402 Cloud handler in
+`x402/oracle` is deployed; see `x402/README.md`. It is a shared secret that
+skips per-call payment, so it belongs in `.env` with `chmod 600` and nowhere
+else.
+
 ## Installing
 
 Two ways in. **Cloning on the server is the simpler one** and needs no SSH
