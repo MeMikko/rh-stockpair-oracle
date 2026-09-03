@@ -580,8 +580,11 @@ against this origin directly. `GET /x402/supported` says which schemes, which
 network and which gateway this deployment actually honours, so a client can
 find out before signing rather than after being refused.
 
-Off while `PRICING_MODE=launch` — every route is served and the 402 never
-fires, while the price headers say what it will cost.
+`PRICING_MODE=paid` since 2026-09-03: a priced route called without payment
+answers 402. `/health` and `/coverage` are unaffected and stay free. Under
+`PRICING_MODE=launch` the 402 never fires and every route is served while the
+price headers still say what it will cost — that is the mode a fresh
+deployment starts in, not the mode this one is in.
 
 ### A model on the fallback path only
 
