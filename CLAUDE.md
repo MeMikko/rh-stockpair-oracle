@@ -27,9 +27,12 @@ than earn margin; see `config/pricing.ts`.
      is-underlying-market-open flag, next corporate action on the pricing
      asset (split, dividend, ticker change).
    - `POST /prepare-swap` – ready-to-sign calldata, router address,
-     min-out with slippage. Never sends transactions. Single-hop only, and
-     v4 only: a v3 pool answers 501 (SwapRouter02 + approval is a different
-     calldata shape, and half-correct calldata is worse than none).
+     min-out with slippage. Never sends transactions. Single-hop only.
+     Both protocols: UniversalRouter + Permit2 for v4, the v3 router with one
+     plain ERC-20 approval for v3. Which v3 router is deployed is read off the
+     chain (`factoryV2()`), never assumed -- the two variants' structs differ
+     by a field, so the selectors differ, and half-correct calldata is worse
+     than none.
    - `GET /gas` – gas estimate for chain 4663, split into L2 and L1-data
      components. Nothing else covers RH gas today.
    - `GET /corporate-actions` – the published calendar joined to the indexed

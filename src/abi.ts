@@ -68,6 +68,37 @@ export const V3_QUOTER_V2_ABI = parseAbi([
   'function quoteExactInputSingle(QuoteExactInputSingleParams params) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
 ]);
 
+/**
+ * The two shapes a Uniswap v3 router can have, and the read that tells them
+ * apart.
+ *
+ * `SwapRouter` (v3-periphery) carries the deadline *inside* the params struct.
+ * `SwapRouter02` (swap-router-contracts) dropped it, and enforces a deadline
+ * through `multicall(uint256 deadline, bytes[] data)` instead. The two structs
+ * differ by one field, so the selectors differ -- calldata for one is not
+ * merely suboptimal on the other, it is unrecognised.
+ *
+ * `factoryV2()` exists only on SwapRouter02, which is what makes it a cheap,
+ * read-only way to establish which is deployed rather than trusting a variable
+ * name to be right.
+ */
+export const V3_SWAP_ROUTER_02_ABI = parseAbi([
+  'struct ExactInputSingleParams { address tokenIn; address tokenOut; uint24 fee; address recipient; uint256 amountIn; uint256 amountOutMinimum; uint160 sqrtPriceLimitX96; }',
+  'function exactInputSingle(ExactInputSingleParams params) payable returns (uint256 amountOut)',
+  'function multicall(uint256 deadline, bytes[] data) payable returns (bytes[] results)',
+  'function factoryV2() view returns (address)',
+  'function WETH9() view returns (address)',
+]);
+
+export const V3_SWAP_ROUTER_01_ABI = parseAbi([
+  'struct ExactInputSingleParams01 { address tokenIn; address tokenOut; uint24 fee; address recipient; uint256 deadline; uint256 amountIn; uint256 amountOutMinimum; uint160 sqrtPriceLimitX96; }',
+  'function exactInputSingle(ExactInputSingleParams01 params) payable returns (uint256 amountOut)',
+]);
+
+export const ERC20_APPROVE_ABI = parseAbi([
+  'function approve(address spender, uint256 amount) returns (bool)',
+]);
+
 export const ERC20_ABI = parseAbi([
   'function symbol() view returns (string)',
   'function name() view returns (string)',

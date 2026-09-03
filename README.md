@@ -316,11 +316,37 @@ identifier, and until this listed some, the only way to get one was to index
 the chain yourself. NVDA has thousands of pools and all but a handful are
 empty, so the list is capped at 25 and says so.
 
-**`/prepare-swap` stays v4 only**, and a v3 pool answers `501` there rather
-than `404` — it is a pool this service will happily quote, and the honest
-reason is that v3 routes through SwapRouter02 with a plain ERC-20 approval
-instead of the UniversalRouter with Permit2. That is a different calldata
-shape, not a different address, and half-correct calldata is worse than none.
+**`/prepare-swap` builds for both**, in two genuinely different shapes. A v4
+pool gets UniversalRouter calldata and the Permit2 pair of approvals. A v3 pool
+gets a direct call to the v3 router and **one** plain ERC-20 approval, scoped
+to the swap rather than unlimited, because v3 pulls the input from the router
+itself.
+
+Three things on the v3 path are established rather than assumed, since each is
+a way to emit calldata that looks right and is not:
+
+- **Which router.** Uniswap shipped two. `SwapRouter` carries the deadline
+  inside the params struct; `SwapRouter02` dropped it and enforces one through
+  `multicall(deadline, [swap])`. One field's difference changes the struct,
+  which changes the selector — calldata for the wrong one is not slightly
+  wrong, it is a function the contract does not have. So the router is probed
+  with `factoryV2()`, which exists only on `SwapRouter02`, and the response
+  reports both the variant and whether it was read off the chain (`chain`) or
+  pinned by an operator (`config`). A probe that cannot reach the RPC answers
+  503 rather than guessing: not knowing which router is deployed is not the
+  same as knowing it is the old one.
+- **The fee.** Taken from the pool's own `fee()` rather than the indexed copy.
+  The router routes by `(tokenIn, tokenOut, fee)`, so a stale fee would send
+  the swap to a different pool than the one that was quoted.
+- **The recipient.** Required, not defaulted. v3 names it in the calldata
+  instead of falling back to the sender, and picking an address for someone
+  else's output is not this service's call.
+
+`swap.encoding` names exactly what was built
+(`SwapRouter02.multicall(deadline, [exactInputSingle])`), so a signer can check
+the calldata rather than trust it. Multi-hop stays unsupported on both
+protocols — a route the quoter never simulated has no min-out, and calldata
+without a min-out is the one thing this endpoint refuses to produce.
 
 ## Status
 
@@ -329,6 +355,7 @@ shape, not a different address, and half-correct calldata is worse than none.
 - [x] Phase 3 — corporate-action calendar + public agent with approval queue
 - [x] Genesis backfill, v3 indexing, volume measurement
 - [x] v3 pools quotable: `/quote` takes a v3 address, `/pools` lists identifiers
+- [x] v3 calldata: `/prepare-swap` builds for both protocols
 - [x] `POST /ask` + Farcaster reply queue
 - [ ] Reconcile the volume gap against Bankr's figure
 - [ ] Cross-check discovery against Blockscout (blocked: free tier allows ~10

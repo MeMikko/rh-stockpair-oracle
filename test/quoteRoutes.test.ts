@@ -146,17 +146,38 @@ describe('/quote', () => {
 
 describe('/prepare-swap on a v3 pool', () => {
   /**
-   * 501 and not 404: the pool is indexed and quotable, and the honest answer
-   * is that the calldata shape is different, not that the pool is unknown.
+   * v3 answered 501 here until the calldata existed. It is now built — and the
+   * checks that run before any chain read are what a test without a chain can
+   * see: a v3 pool asks for the recipient it must name in the calldata, where
+   * an unindexed pool is still a 404.
    */
-  it('says the pool is v3 and points at the quote it can serve', async () => {
+  it('asks for the recipient v3 must name in the calldata', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/prepare-swap',
       payload: { pool: V3_ADDR, amountIn: '1000000', zeroForOne: true },
     });
-    expect(res.statusCode).toBe(501);
-    expect(res.json()).toMatchObject({ protocol: 'v3', quotable: `GET /quote?pool=${V3_ADDR}` });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/recipient required/);
+  });
+
+  it('rejects a malformed recipient rather than encoding it', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/prepare-swap',
+      payload: { pool: V3_ADDR, amountIn: '1000000', zeroForOne: true, recipient: 'me' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('checks the amount before anything else, on v3 as on v4', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/prepare-swap',
+      payload: { pool: V3_ADDR, amountIn: '0', zeroForOne: true, recipient: V3_QUIET },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/positive integer/);
   });
 
   it('still 404s a pool nobody has indexed', async () => {

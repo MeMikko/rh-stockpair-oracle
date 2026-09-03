@@ -74,7 +74,7 @@ GET  /pools?symbol=NVDA          counts per protocol + the top pool ids to quote
 GET  /volume                     24h stock-paired volume, and its measurement window
 GET  /quote?pool=<id>&size=<n>   implied USD, depth, price impact, deviation, market hours
                                  <id> = v4 poolId OR v3 pool address
-POST /prepare-swap               unsigned UniversalRouter calldata, bounded min-out (v4 only)
+POST /prepare-swap               unsigned calldata, bounded min-out (v4 and v3)
 GET  /gas                        chain 4663 gas, split into L2 and L1-data components
 GET  /corporate-actions          upcoming splits/dividends joined to the affected pools
 POST /ask                        free-text question, structured answer
@@ -141,10 +141,17 @@ If the quoter cannot price the swap it returns **422 and no calldata**.
 Handing back a transaction whose output cannot be bounded is the one failure
 worth refusing outright.
 
-**v4 pools only.** A v3 pool is indexed and quotable, and answers `501` here
-with the quote route to use: v3 goes through SwapRouter02 with a plain ERC-20
-approval rather than the UniversalRouter with Permit2, so the calldata is a
-different shape. Quote it here and build the swap with a v3 SDK.
+**Both protocols, two different shapes.** A v4 pool gets UniversalRouter
+calldata plus the Permit2 pair of approvals. A v3 pool gets a direct call to
+the v3 router plus **one** plain ERC-20 approval, scoped to the swap rather
+than unlimited — and it requires an explicit `recipient`, because v3 names the
+recipient in the calldata instead of defaulting to the sender.
+
+The response's `router` block says which v3 router the calldata was built for
+and whether that was read off the chain or configured. It matters: `SwapRouter`
+and `SwapRouter02` differ by one struct field, so the selectors differ, and
+calldata for the wrong one is a function the contract does not have.
+`swap.encoding` names exactly what was built.
 
 **Single-hop only.** RH's UniversalRouter `execute` is standard
 (`0x3593564c`) and single-hop `SWAP_EXACT_IN_SINGLE` reproduces a real on-chain
