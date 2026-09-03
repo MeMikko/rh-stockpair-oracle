@@ -245,13 +245,24 @@ function script(): string {
 
     section('queue','/admin/queue', function(b){
       if (!b.drafts.length && !b.approved.length) return '<span class="sub">nothing waiting</span>';
-      return b.drafts.map(function(p){
+      var drafts = b.drafts.map(function(p){
         return '<div class="panel"><div>'+esc(p.draftText)+'</div>'+
-          '<div class="sub">'+esc(p.channels.join(', '))+' · '+esc(p.id.slice(0,8))+'</div>'+
+          '<div class="sub">'+esc(p.channels.join(', '))+' · '+esc(p.draftedBy)+' · '+esc(p.id)+'</div>'+
           '<div class="row" style="margin-top:8px">'+
           '<button class="primary" data-approve="'+esc(p.id)+'">Approve</button>'+
           '<button data-reject="'+esc(p.id)+'">Reject</button></div></div>';
-      }).join('') + (b.approved.length ? '<div class="sub">'+b.approved.length+' approved and awaiting publish</div>' : '');
+      }).join('');
+      var approved = b.approved.map(function(p){
+        return '<div class="panel"><div>'+esc(p.draftText)+'</div>'+
+          '<div class="sub">approved by '+esc(p.decidedBy||'?')+' · '+esc(p.channels.join(', '))+
+          (p.replyTo ? ' · reply' : ' · broadcast')+'</div>'+
+          '<div class="row" style="margin-top:8px">'+
+          '<button data-dry="'+esc(p.id)+'">Dry run</button>'+
+          '<button class="danger" data-send="'+esc(p.id)+'">Publish for real</button></div>'+
+          '<div id="pub-'+esc(p.id)+'"></div></div>';
+      }).join('');
+      return (drafts ? '<div class="sub">waiting for approval</div>'+drafts : '') +
+             (approved ? '<div class="sub">approved, not yet sent</div>'+approved : '');
     }).then(function(){
       Array.prototype.forEach.call(document.querySelectorAll('[data-approve],[data-reject]'), function(btn){
         btn.onclick = async function(){
@@ -259,6 +270,15 @@ function script(): string {
           var decision = btn.hasAttribute('data-approve') ? 'approved' : 'rejected';
           await api('/admin/queue/'+encodeURIComponent(id)+'/decide', {method:'POST', body: JSON.stringify({decision:decision})});
           loadAll();
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-dry]'), function(btn){
+        btn.onclick = function(){ publish(btn.getAttribute('data-dry'), false); };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-send]'), function(btn){
+        btn.onclick = function(){
+          if (!confirm('Send this to the public timeline? It cannot be taken back.')) return;
+          publish(btn.getAttribute('data-send'), true);
         };
       });
     });
@@ -272,6 +292,26 @@ function script(): string {
             '<td>'+esc(l.chain||'')+'</td><td>'+esc(l.status||'')+'</td></tr>';
         }).join('')+'</table>';
     });
+  }
+
+  // ---- publishing ----
+  // Without confirm:"SEND" the server treats it as a dry run, so the dry-run
+  // button is the same call minus the word.
+  async function publish(id, live){
+    var out = $('pub-'+id);
+    out.innerHTML = '<span class="sub">'+(live ? 'sending' : 'dry run')+'…</span>';
+    var r = await api('/admin/queue/'+encodeURIComponent(id)+'/publish',
+      {method:'POST', body: JSON.stringify(live ? {confirm:'SEND'} : {})});
+    if (r.status !== 200){ out.innerHTML = '<div class="err">'+esc(r.body.error||'failed')+'</div>'; return; }
+    var lines = (r.body.results||[]).map(function(x){
+      return x.channel+': '+(x.error ? 'ERROR '+x.error : (x.dryRun ? 'would post' : 'posted '+x.ref));
+    }).join('\\n');
+    var cls = r.body.status === 'posted' ? 'ok' : (r.body.status === 'failed' ? 'err' : 'sub');
+    out.innerHTML = '<div class="'+cls+'">'+esc(r.body.status)+'</div>'+
+      (lines ? '<pre>'+esc(lines)+'</pre>' : '')+
+      (r.body.note ? '<div class="note">'+esc(r.body.note)+'</div>' : '');
+    // Only a live send changes a row, and only then is the list stale.
+    if (live && r.body.status === 'posted') setTimeout(loadAll, 1200);
   }
 
   // ---- Bankr's own agent ----

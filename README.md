@@ -458,8 +458,9 @@ SQLite file and the heavy job is the periodic volume walk, not the API.
 Two things are true of that box by construction. The API binds `127.0.0.1`, so
 Caddy is the only route in and port 8080 is never on the internet. And
 **nothing scheduled there can publish**: the agent timer writes drafts to the
-approval queue, and sending still needs a person to approve one and run
-`agent:publish -- --live` by hand.
+approval queue, and sending needs a person — either `agent:publish -- --live`
+on the box, or the publish button in the operator panel, which is the same
+code path behind a typed confirmation and reachable only over a tunnel.
 
 `skill/` is the package for a PR to
 [BankrBot/skills](https://github.com/BankrBot/skills) — `SKILL.md`,

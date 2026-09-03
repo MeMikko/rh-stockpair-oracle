@@ -24,8 +24,9 @@ import {
   walletMe,
   type DeployRequest,
 } from '../bankr/client.js';
-import { decide, enqueue, listPosts } from '../agent/queue.js';
+import { decide, enqueue, getPost, listPosts } from '../agent/queue.js';
 import { fetchLlmSpend } from '../llm/spend.js';
+import { publishPost } from '../agent/publish/index.js';
 import { MAX_POST_LENGTH, verifyDraft } from '../agent/verify.js';
 import { loadSignal, saveSignals, type Signal } from '../agent/signals.js';
 import {
@@ -367,6 +368,49 @@ export function buildAdminServer(): FastifyInstance {
       return { ok: true, result: res };
     } catch (err) {
       return sendBankrError(reply, err);
+    }
+  });
+
+  /**
+   * Send an approved post.
+   *
+   * The last gate before a public timeline, and the only irreversible thing
+   * in this panel that is not a transaction. Four things have to hold, and
+   * three of them were already true before this route existed:
+   *
+   *   1. the post is `approved` — someone acted on it, in a separate click;
+   *   2. the channel has credentials, or it is skipped rather than failed;
+   *   3. `confirm: "SEND"` — without it this is a dry run, like the launch;
+   *   4. the owner gate, as everywhere else here.
+   *
+   * The rules themselves live in publishPost, shared with agent:publish. Two
+   * copies of "what may go out" is how one of them ends up wrong.
+   */
+  app.post('/admin/queue/:id/publish', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const post = getPost(id);
+    if (!post) return reply.code(404).send({ error: 'no post with that id' });
+
+    const live = (req.body as { confirm?: string } | undefined)?.confirm === 'SEND';
+    try {
+      const outcome = await publishPost(post, live);
+      if (outcome.status === 'skipped') {
+        req.log.warn(`publish ${id} skipped: no credentials for ${outcome.skipped.join(', ')}`);
+        return {
+          ...outcome,
+          note: 'still approved — configure the channel and try again; nothing was sent',
+        };
+      }
+      req.log.info(
+        `${live ? 'PUBLISHED' : 'dry-run'} ${id} by ${owner(req)} -> ${outcome.results
+          .map((r) => `${r.channel}:${r.error ?? r.ref ?? 'would post'}`)
+          .join(', ')}`,
+      );
+      return outcome;
+    } catch (err) {
+      // assertPublishable throws for anything not approved. That is a refusal
+      // to be reported, not a server fault.
+      return reply.code(400).send({ error: (err as Error).message });
     }
   });
 

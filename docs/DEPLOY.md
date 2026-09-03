@@ -378,8 +378,11 @@ that sent it); a **composer** for writing a post by hand, held to the same
 verifier as a drafted one, queued rather than published; and a **mentions**
 view that drafts a reply through the same classifier the webhook uses.
 
-Nothing there publishes. Sending is still `npm run agent:publish -- --live`,
-run by a person on the box.
+Publishing is there too, on approved posts only: a dry run by default, and a
+real send behind a typed confirmation. It is the same `publishPost` the CLI
+calls, so `agent:publish -- --live` and the button cannot drift apart. A
+channel with no credentials is skipped rather than failed — the post stays
+approved instead of being burned.
 
 Launching a token from the panel simulates by default; a real deploy needs the
 symbol typed back verbatim. Deploys are irreversible and capped at three

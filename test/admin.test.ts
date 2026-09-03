@@ -213,3 +213,56 @@ describe('the composer holds a person to the same rule as the model', () => {
     }
   });
 });
+
+describe('publishing is the last gate, and it holds', () => {
+  /**
+   * The panel gained a button for the one irreversible thing here that is not
+   * a transaction. Each refusal below is a separate reason, and each is worth
+   * a test because a regression in any one of them is public.
+   */
+  it('refuses a draft, dry-runs by default, and never burns a post on a missing channel', async () => {
+    const app = buildAdminServer();
+    app.log.level = 'silent';
+    try {
+      const nonceRes = await app.inject(`/admin/nonce?address=${owner.address}`);
+      const { nonce, message } = JSON.parse(nonceRes.body) as { nonce: string; message: string };
+      const verify = await app.inject({
+        method: 'POST',
+        url: '/admin/verify',
+        payload: { address: owner.address, signature: await owner.signMessage({ message }), nonce },
+      });
+      const cookie = String(verify.headers['set-cookie']).split(';')[0]!;
+      const post = (url: string, payload: Record<string, unknown>) =>
+        app.inject({ method: 'POST' as const, url, headers: { cookie }, payload });
+
+      const made = await post('/admin/compose', {
+        text: 'Indexing stock-paired pools across both Uniswap versions on Robinhood Chain.',
+      });
+      const id = JSON.parse(made.body).post.id as string;
+
+      // Approval is a separate act from sending. Without it, nothing goes.
+      const early = await post(`/admin/queue/${id}/publish`, { confirm: 'SEND' });
+      expect(early.statusCode).toBe(400);
+      expect(JSON.parse(early.body).error).toMatch(/not 'approved'/);
+
+      await post(`/admin/queue/${id}/decide`, { decision: 'approved' });
+
+      // No confirm word means a dry run, exactly as a launch simulates.
+      const dry = await post(`/admin/queue/${id}/publish`, {});
+      expect(JSON.parse(dry.body).status).toBe('dry-run');
+      expect(JSON.parse(dry.body).live).toBe(false);
+
+      // No Farcaster credentials in a test process. The post must survive
+      // that: skipping keeps it approved, where failing would throw away
+      // something a person had already signed off on.
+      const live = await post(`/admin/queue/${id}/publish`, { confirm: 'SEND' });
+      expect(JSON.parse(live.body).status).toBe('skipped');
+      expect(JSON.parse(live.body).skipped).toContain('farcaster');
+
+      const queue = await app.inject({ url: '/admin/queue', headers: { cookie } });
+      expect(JSON.parse(queue.body).approved.map((p: { id: string }) => p.id)).toContain(id);
+    } finally {
+      await app.close();
+    }
+  });
+});
