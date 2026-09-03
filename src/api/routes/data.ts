@@ -28,7 +28,14 @@ function symbolFrom(req: { query: unknown }): string | null {
 
 export function registerData(app: FastifyInstance): void {
   /**
-   * Pool counts for a stock, split by protocol. What `pools` answers cite.
+   * Pools for a stock: the counts, and enough identifiers to act on them.
+   *
+   * The counts are what `pools` answers cite. The list exists because a count
+   * is not actionable: `/quote` takes a pool identifier, and until this
+   * returned some, the only way to obtain one was to index the chain yourself.
+   * Ordered by measured 24h swap count where a measurement exists, because the
+   * pool worth quoting is the one that trades — NVDA has thousands, and all but
+   * a handful are empty.
    */
   app.get('/pools', async (req, reply) => {
     const symbol = symbolFrom(req);
@@ -45,7 +52,61 @@ export function registerData(app: FastifyInstance): void {
     if (!known) {
       return reply.code(404).send({ error: `${symbol} is not a stock token on this chain` });
     }
-    return { symbol, chainId: 4663, v4Pools: v4, v3Pools: v3, totalPools: v4 + v3 };
+
+    const LIMIT = 25;
+    const listed = db
+      .prepare(
+        `SELECT id, protocol, fee, tick_spacing, paired_token, stock_side, init_block, swaps
+           FROM (
+             SELECT p.pool_id AS id, 'v4' AS protocol, p.fee, p.tick_spacing, p.paired_token,
+                    p.stock_side, p.init_block, COALESCE(v.swaps, -1) AS swaps
+               FROM pools p
+               LEFT JOIN pool_volume v ON v.pool_key = p.pool_id AND v.protocol = 'v4'
+              WHERE p.stock_symbol = ?
+              UNION ALL
+             SELECT p3.address AS id, 'v3' AS protocol, p3.fee, p3.tick_spacing, p3.paired_token,
+                    p3.stock_side, p3.init_block, COALESCE(v3.swaps, -1) AS swaps
+               FROM pools_v3 p3
+               LEFT JOIN pool_volume v3 ON v3.pool_key = p3.address AND v3.protocol = 'v3'
+              WHERE p3.stock_symbol = ?
+           )
+          ORDER BY swaps DESC, init_block DESC
+          LIMIT ${LIMIT}`,
+      )
+      .all(symbol, symbol) as Array<{
+      id: string; protocol: string; fee: number; tick_spacing: number;
+      paired_token: string | null; stock_side: number | null; init_block: number; swaps: number;
+    }>;
+
+    return {
+      symbol,
+      chainId: 4663,
+      v4Pools: v4,
+      v3Pools: v3,
+      totalPools: v4 + v3,
+      pools: listed.map((r) => ({
+        // What to pass to /quote?pool= — a poolId on v4, a pool address on v3.
+        pool: r.id,
+        protocol: r.protocol,
+        fee: r.fee,
+        tickSpacing: r.tick_spacing,
+        pairedToken: r.paired_token,
+        stockSide: r.stock_side,
+        createdAtBlock: r.init_block,
+        // -1 in the join means "never measured", which is not the same as
+        // "measured at zero" and must not be published as a number.
+        swaps24h: r.swaps < 0 ? null : r.swaps,
+        quote: `GET /quote?pool=${r.id}`,
+      })),
+      listing: {
+        returned: listed.length,
+        limit: LIMIT,
+        orderedBy: 'measured 24h swap count, then newest',
+        note:
+          'swaps24h is null where the rolling measurement has not covered that pool; see ' +
+          'GET /volume for the window. Both protocols are quotable: v4 by poolId, v3 by address.',
+      },
+    };
   });
 
   /**

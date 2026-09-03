@@ -3,6 +3,9 @@ import { ROUTE_PRICES, pricingMode } from '../../../config/pricing.js';
 import { paymentConfig, priceUnits, PAYMENT_CHAIN_ID, formatUsdc } from '../../../config/payments.js';
 import { agentIdentity } from '../../../config/agent.js';
 import { authConfigured } from '../../auth/session.js';
+import {
+  facilitatorConfigured, gatewayAdvertised, gatewayTrusted, x402Config,
+} from '../../../config/x402.js';
 
 /**
  * A machine-readable description of this service.
@@ -41,12 +44,20 @@ export function serviceDescriptor(): Record<string, unknown> {
       'GET /health': 'index freshness: pool counts, cursors with lag in seconds',
       'GET /coverage': 'which of the 194 stock tokens have a Chainlink feed',
       'GET /price?symbol=': "a stock's own USD price from Chainlink; 404 with a reason where no feed exists",
-      'GET /pools?symbol=': 'pool counts for a stock, split by protocol',
+      'GET /pools?symbol=':
+        'pool counts for a stock split by protocol, plus the top 25 pool identifiers to ' +
+        'quote, ordered by measured 24h swaps',
       'GET /volume': '24h stock-paired volume and the window it was measured over',
       'GET /corporate-actions?withinDays=': 'upcoming splits and dividends joined to affected pools',
-      'GET /quote?pool=&size=': 'implied USD, depth, price impact, Chainlink deviation, market hours',
-      'POST /prepare-swap': 'unsigned UniversalRouter calldata with a min-out from the quoter',
+      'GET /quote?pool=&size=':
+        'implied USD, depth, price impact, Chainlink deviation, market hours. Takes a v4 ' +
+        'poolId or a v3 pool address; `protocol` in the response says which',
+      'POST /prepare-swap':
+        'unsigned UniversalRouter calldata with a min-out from the quoter. v4 pools only',
       'POST /ask': 'free-text question; returns facts and a reproduce call',
+      'GET /x402/supported': 'which payment schemes and network this deployment settles',
+      'POST /x402/topup': 'turn a USDC transfer into prepaid credit: {"txHash": "0x…"}',
+      'GET /x402/balance?payer=': 'prepaid credit remaining for an address',
     },
 
     /**
@@ -62,7 +73,8 @@ export function serviceDescriptor(): Record<string, unknown> {
         'Chainlink feed, so a deviation is unknowable rather than absent. Read deviationReason.',
       depthVsImpact:
         'depth is an active-tick estimate and can mislead. impact comes from an on-chain ' +
-        'quoter simulation. Size a trade on impact.',
+        'quoter simulation. Size a trade on impact. `impact.source` names the quoter that ' +
+        'produced it: `quoter` for v4, `quoter-v3` for v3.',
       volumeFreshness:
         'Volume is a rolling 24h measurement refreshed every 6h, not live. GET /volume ' +
         'reports measuredSecondsAgo; use it rather than deriving age from a block delta.',
@@ -80,16 +92,61 @@ export function serviceDescriptor(): Record<string, unknown> {
             'The methods below already work and will be required when billing is enabled.'
           : 'Billing is enabled. Use one of the methods below.',
       methods: [
+        // First, because it is the door most callers already have an account
+        // for -- and the only one where somebody else does the settling.
+        ...(gatewayAdvertised()
+          ? [
+              {
+                id: 'bankr-x402-gateway',
+                for: 'agents that already pay for things through Bankr',
+                available: gatewayTrusted(),
+                url: x402Config.gateway.url,
+                how:
+                  'Call this service at the Bankr URL above instead of here. Bankr issues the ' +
+                  '402, takes the USDC on Base, settles it, and forwards the paid request to ' +
+                  'this origin with the payer’s address. Same routes, same responses; the ' +
+                  'payment is between you and Bankr.',
+                note: gatewayTrusted()
+                  ? 'Requests forwarded by the gateway are authenticated with a shared secret.'
+                  : 'The gateway is published but this origin cannot yet authenticate its ' +
+                    'requests, so they are treated as unpaid once billing is on.',
+              },
+            ]
+          : []),
         {
-          id: 'x402',
-          for: 'agents, per call, no account',
+          id: 'x402-exact',
+          for: 'agents, per call, no account — the published protocol',
+          available: facilitatorConfigured(),
           how:
-            'Call a priced route with no credential to receive HTTP 402. The body carries the ' +
-            'chain, asset, amount and address. Send USDC on Base to the treasury, then retry ' +
-            'with header `x-payment: <transaction hash>`. The full amount becomes prepaid ' +
-            'credit and each call debits its own price; a transfer costs more than one call is ' +
-            'worth, so one transfer funds many.',
+            'Call a priced route with no credential to receive HTTP 402. `accepts` carries a ' +
+            'standard x402 `exact` requirement: sign an EIP-3009 authorization for the amount ' +
+            'and resource it names, base64-encode the payment payload, and retry with it in ' +
+            'the `X-PAYMENT` header. It is verified and settled through a standard facilitator, ' +
+            'which pays the gas — x402-fetch does all of this unchanged. The settlement ' +
+            'transaction comes back in `X-PAYMENT-RESPONSE`.',
+          facilitator: facilitatorConfigured() ? x402Config.facilitatorUrl : null,
+          network: x402Config.network,
+          supported: 'GET /x402/supported',
+          header: 'x-payment',
+          // Said rather than left to be discovered: a deployment with no
+          // facilitator still answers 402, and a client that has signed an
+          // authorization deserves to know it will not be read.
+          note: facilitatorConfigured()
+            ? undefined
+            : 'No facilitator is configured on this deployment; use x402-credit below.',
+        },
+        {
+          id: 'x402-credit',
+          for: 'callers that would rather transfer once than sign per call',
+          how:
+            'Send USDC on Base to the treasury, then POST the hash to /x402/topup. The full ' +
+            'amount becomes prepaid credit — any amount, no minimum — and each call debits its ' +
+            'own price. Draw on it with header `x-payment: <your address>`. Sending the ' +
+            'transaction hash in that header works too and tops up on first use. This is not ' +
+            'the x402 `exact` scheme and is named `onchain-transfer-credit` so a standard ' +
+            'client fails cleanly rather than signing something nobody reads.',
           balance: 'GET /x402/balance?payer=0x…',
+          topUp: 'POST /x402/topup {"txHash": "0x…"}',
           header: 'x-payment',
         },
         {
@@ -116,11 +173,23 @@ export function serviceDescriptor(): Record<string, unknown> {
     payment: {
       chain: 'base',
       chainId: PAYMENT_CHAIN_ID,
+      network: x402Config.network,
       asset: paymentConfig.usdc,
       assetSymbol: 'USDC',
       assetDecimals: paymentConfig.usdcDecimals,
       payTo: paymentConfig.treasury,
+      // Applies to the transfer-and-credit path only. An `exact` payment is
+      // settled by the facilitator, which decides its own confirmation rule.
       confirmations: paymentConfig.confirmations,
+      x402: {
+        version: 1,
+        schemes: facilitatorConfigured() ? ['exact', 'onchain-transfer-credit'] : ['onchain-transfer-credit'],
+        facilitator: facilitatorConfigured() ? x402Config.facilitatorUrl : null,
+        bankrGateway: gatewayAdvertised()
+          ? { url: x402Config.gateway.url, trustedByOrigin: gatewayTrusted() }
+          : null,
+        supported: 'GET /x402/supported',
+      },
     },
 
     pricing: {
@@ -136,6 +205,11 @@ export function serviceDescriptor(): Record<string, unknown> {
     },
 
     limits: {
+      v3Calldata:
+        'POST /prepare-swap is v4 only. A v3 pool is indexed and quotable but answers 501 ' +
+        'there: v3 routes through SwapRouter02 with a plain ERC-20 approval rather than the ' +
+        'UniversalRouter with Permit2, so the calldata is a different shape and nothing here ' +
+        'will emit a half-correct version of it.',
       multiHopSwaps:
         "not supported. RH's UniversalRouter ExactInputParams carries a field upstream " +
         'v4-periphery does not have; it was empty in every live sample decoded, so its type ' +

@@ -13,5 +13,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "config/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "config/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "x402/**/*.ts"]
 }

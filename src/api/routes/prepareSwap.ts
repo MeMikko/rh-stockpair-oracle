@@ -41,9 +41,33 @@ export function registerPrepareSwap(app: FastifyInstance): void {
       });
     }
 
+    const key = body.pool.toLowerCase();
     const pool = getDb().prepare('SELECT * FROM pools WHERE pool_id = ?')
-      .get(body.pool.toLowerCase()) as PoolRecord | undefined;
-    if (!pool) return reply.code(404).send({ error: 'pool not indexed', poolId: body.pool });
+      .get(key) as PoolRecord | undefined;
+    if (!pool) {
+      // A v3 pool is indexed and quotable, and still cannot be encoded here:
+      // v3 swaps go through SwapRouter02 with a plain ERC-20 approval, not
+      // through the UniversalRouter with Permit2, so the calldata is a
+      // different shape rather than a different address. Saying so is better
+      // than a bare 404 that reads as "unknown pool" for a pool /quote just
+      // answered about.
+      const v3 = getDb().prepare('SELECT address FROM pools_v3 WHERE address = ?').get(key) as
+        | { address: string }
+        | undefined;
+      if (v3) {
+        return reply.code(501).send({
+          error: 'that is a v3 pool; calldata for v3 is not implemented',
+          poolId: body.pool,
+          protocol: 'v3',
+          quotable: `GET /quote?pool=${v3.address}`,
+          note:
+            'v3 routes through SwapRouter02 with an ERC-20 approval rather than the ' +
+            'UniversalRouter with Permit2. Nothing here will emit half-correct calldata: ' +
+            'quote it here and build the swap with a v3 SDK, or ask for v3 support.',
+        });
+      }
+      return reply.code(404).send({ error: 'pool not indexed', poolId: body.pool });
+    }
 
     let amountIn: bigint;
     try {

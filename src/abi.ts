@@ -55,6 +55,19 @@ export const V4_QUOTER_ABI = parseAbi([
   'function quoteExactInputSingle(QuoteExactSingleParams params) returns (uint256 amountOut, uint256 gasEstimate)',
 ]);
 
+/**
+ * v3 QuoterV2. Same discipline as the v4 quoter: it is nonpayable and returns
+ * through a revert internally, so it is only ever reached through eth_call.
+ *
+ * The struct and return tuple are v3-periphery's, unchanged -- RH's v3 is a
+ * stock deployment. `sqrtPriceLimitX96: 0` means "no limit", which is what a
+ * quote wants: the point is to learn the impact, not to cap it.
+ */
+export const V3_QUOTER_V2_ABI = parseAbi([
+  'struct QuoteExactInputSingleParams { address tokenIn; address tokenOut; uint256 amountIn; uint24 fee; uint160 sqrtPriceLimitX96; }',
+  'function quoteExactInputSingle(QuoteExactInputSingleParams params) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
+]);
+
 export const ERC20_ABI = parseAbi([
   'function symbol() view returns (string)',
   'function name() view returns (string)',

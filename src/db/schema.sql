@@ -266,7 +266,11 @@ CREATE TABLE IF NOT EXISTS payments (
   payer      TEXT NOT NULL,
   amount     TEXT NOT NULL,      -- base units, as a string
   claimed_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,   -- 0 for credit: a balance does not expire
+  -- 'pro' or 'credit'. One transaction buys one of the two: without this
+  -- column a hash presented to both paths would buy a subscription and a
+  -- balance for the same money, and each path would think it was the only one.
+  purpose    TEXT NOT NULL DEFAULT 'pro'
 );
 CREATE INDEX IF NOT EXISTS payments_payer ON payments(payer);
 
@@ -285,7 +289,7 @@ CREATE INDEX IF NOT EXISTS fid_links_address ON fid_links(address);
 
 -- Prepaid x402 credit, in USDC base units.
 --
--- A USDC transfer costs more in gas and latency than a $0.005 call is worth,
+-- A USDC transfer costs more in gas and latency than a $0.02 call is worth,
 -- so a transfer buys a balance that many calls draw down rather than settling
 -- one call at a time. Balances are strings because they are token base units
 -- and must not round.
@@ -294,3 +298,20 @@ CREATE TABLE IF NOT EXISTS x402_credits (
   balance    TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+-- x402 authorizations that have already bought a call.
+--
+-- EIP-3009 nonces are single-use on chain, so a replay cannot settle twice.
+-- The window this closes is the one between verifying a payment and settling
+-- it: without a local claim, the same authorization could buy two responses
+-- and pay for one. A row is deleted again when settlement fails, so a caller
+-- whose payment did not go through may retry with the same signature.
+CREATE TABLE IF NOT EXISTS x402_authorizations (
+  nonce      TEXT PRIMARY KEY,
+  route      TEXT NOT NULL,
+  payer      TEXT,
+  claimed_at INTEGER NOT NULL,
+  status     TEXT NOT NULL,      -- claimed | settled | failed
+  settled_tx TEXT
+);
+CREATE INDEX IF NOT EXISTS x402_authorizations_payer ON x402_authorizations(payer);

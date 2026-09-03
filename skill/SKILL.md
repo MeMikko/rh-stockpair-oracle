@@ -19,16 +19,16 @@ every route is served without charge and no key is required, while each
 response publishes what the call will cost once billing is enabled.
 
 ```
-x-oracle-price-usd: 0.01     what this route will cost
+x-oracle-price-usd: 0.02     what this route will cost
 x-oracle-charged-usd: 0      what it cost you today
 x-oracle-pricing: launch     the current mode
 ```
 
-Read those headers rather than assuming. Intended prices are $0.005 for index
-reads (`/corporate-actions`, `/ask`) and $0.01 for anything that costs an
-upstream RPC round trip (`/quote`, `/prepare-swap`, `/gas`). `/health` and
-`/coverage` stay free. Prices are set to cover upstream cost, not to earn
-margin — adoption is the goal.
+Read those headers rather than assuming. The intended price is **$0.02 for
+every priced route** — one figure, because Bankr's gateway prices an endpoint
+rather than a route, and a published split it does not honour would be a price
+callers are not charged. `/health` and `/coverage` stay free. Prices cover
+upstream cost rather than earn margin — adoption is the goal.
 
 ## Why this exists
 
@@ -70,10 +70,11 @@ GET  /.well-known/agent.json     START HERE: endpoints, auth, payment, limits
 GET  /health                     index freshness: cursors with lag in seconds
 GET  /coverage                   which stock tokens have a Chainlink feed
 GET  /price?symbol=TSLA          a stock's own USD price from its Chainlink feed
-GET  /pools?symbol=NVDA          pool counts for a stock, split by protocol
+GET  /pools?symbol=NVDA          counts per protocol + the top pool ids to quote
 GET  /volume                     24h stock-paired volume, and its measurement window
-GET  /quote?pool=<id>&size=<usd> implied USD, depth, price impact, deviation, market hours
-POST /prepare-swap               unsigned UniversalRouter calldata with a bounded min-out
+GET  /quote?pool=<id>&size=<n>   implied USD, depth, price impact, deviation, market hours
+                                 <id> = v4 poolId OR v3 pool address
+POST /prepare-swap               unsigned UniversalRouter calldata, bounded min-out (v4 only)
 GET  /gas                        chain 4663 gas, split into L2 and L1-data components
 GET  /corporate-actions          upcoming splits/dividends joined to the affected pools
 POST /ask                        free-text question, structured answer
@@ -85,10 +86,17 @@ POST /ask                        free-text question, structured answer
 curl 'https://oracle.sb4s.xyz/quote?pool=0x30e5…dced&size=1000'
 ```
 
-Returns spot from `StateView.getSlot0`, implied USD of the paired token, price
-impact simulated on the on-chain v4 `Quoter`, the live LP fee (correct for
-dynamic-fee pools), deviation vs Chainlink, whether the underlying market is
-open, and the next corporate action on the pricing asset.
+**Takes either protocol**: a v4 poolId (32 bytes) or a v3 pool address.
+`protocol` in the response says which, and `impact.source` names the quoter
+that produced the figure (`quoter` for v4, `quoter-v3` for v3, which also
+reports `ticksCrossed`). This matters because v3 carries ~37% of stock-paired
+volume and four of the five largest stock-paired pools are v3. Get an
+identifier from `GET /pools?symbol=`.
+
+Returns spot from the pool's own sqrt price, implied USD of the paired token,
+price impact simulated on the on-chain quoter, the live LP fee (correct for
+dynamic-fee v4 pools), deviation vs Chainlink, whether the underlying market
+is open, and the next corporate action on the pricing asset.
 
 **Read the labels.** The response says what is measured and what is estimated:
 
@@ -132,6 +140,11 @@ these pools the hook and the live dynamic fee both move the real output.
 If the quoter cannot price the swap it returns **422 and no calldata**.
 Handing back a transaction whose output cannot be bounded is the one failure
 worth refusing outright.
+
+**v4 pools only.** A v3 pool is indexed and quotable, and answers `501` here
+with the quote route to use: v3 goes through SwapRouter02 with a plain ERC-20
+approval rather than the UniversalRouter with Permit2, so the calldata is a
+different shape. Quote it here and build the swap with a v3 SDK.
 
 **Single-hop only.** RH's UniversalRouter `execute` is standard
 (`0x3593564c`) and single-hop `SWAP_EXACT_IN_SINGLE` reproduces a real on-chain
@@ -201,15 +214,17 @@ know. There is no fallback that guesses.
 ## Access and payment
 
 **Start here: `GET /.well-known/agent.json`.** A machine-readable description
-of every endpoint, the three access methods, the payment details and the
+of every endpoint, the access methods, the payment details and the
 limits. Also served from `GET /` when you send `Accept: application/json`, and
 advertised in a `Link: rel="service-desc"` header on every response.
 
-Three methods, all live:
+Five methods, all live:
 
 | Method | For | How |
 |---|---|---|
-| **x402** | agents, per call, no account | Call a priced route with no credential → `402` carrying chain, asset, amount and address. Pay, retry with `x-payment: <tx hash>`. The transfer becomes prepaid credit that calls draw down — a transfer costs more in gas than one $0.005 call is worth. Balance: `GET /x402/balance?payer=0x…` |
+| **Bankr x402 gateway** | agents that already pay through Bankr | Call `https://x402.bankr.bot/0x4b19ee2a3de2521a3adc901989944c209c0a60ea/vates` instead of this origin. Bankr issues the 402, takes the USDC on Base, settles it and forwards the paid request here. Same routes, same responses |
+| **x402, scheme `exact`** | agents paying this origin directly | The published protocol, settled through a standard open facilitator. Call a priced route with no credential → `402` whose `accepts[0]` is `exact` on `base`. Sign the EIP-3009 authorization, retry with it base64-encoded in `x-payment`. `x402-fetch` does this for you; the facilitator pays the gas. What this deployment accepts: `GET /x402/supported` |
+| **x402, prepaid credit** | callers that would rather transfer once than sign per call | Send USDC on Base to the treasury, then `POST /x402/topup {"txHash"}`. Any amount, no minimum; each call debits its own price. Balance: `GET /x402/balance?payer=0x…` |
 | **wallet signature** | session-based | `GET /auth/nonce?address=0x…` returns the exact message to sign → `personal_sign` → `POST /auth/verify {address, signature, nonce}` → bearer token |
 | **pro** | direct answers on Farcaster, unmetered | $5.99 USDC on Base for 30 days, `POST /pro/claim {txHash}`. Does not auto-renew. `POST /pro/link-fid {fid}` links a Farcaster account |
 

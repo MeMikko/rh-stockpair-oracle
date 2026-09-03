@@ -49,6 +49,15 @@ const GENERATED: Record<string, { bytes: number; note: string; home: Home }> = {
     home: 'admin',
     note: 'signs operator-panel sessions; must differ from AUTH_SECRET so a public session is not an admin one',
   },
+  VATES_BACKEND_SECRET: {
+    bytes: 32,
+    home: 'env',
+    // Generated here AND pasted into the Bankr endpoint's own environment.
+    // Both sides must hold the same string: this one is the origin's copy, and
+    // a value only one side knows fails closed -- gateway traffic is treated
+    // as unpaid rather than let through.
+    note: 'proves a request came from the Bankr x402 gateway; paste the SAME value into the gateway',
+  },
 };
 
 /** Issued elsewhere. Generating a value here would only fake being configured. */

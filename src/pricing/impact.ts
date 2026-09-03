@@ -13,7 +13,13 @@ export interface ImpactResult {
   /** Fractional shortfall vs spot, e.g. 0.0123 = 1.23%. */
   priceImpact: number;
   gasEstimate: bigint;
-  source: 'quoter';
+  /** Which quoter produced it. Published, so a consumer can tell them apart. */
+  source: 'quoter' | 'quoter-v3';
+  /**
+   * v3 only: initialized ticks the swap crossed. A high count on a small size
+   * is the clearest signal that a pool's liquidity is fragmented.
+   */
+  ticksCrossed?: number;
 }
 
 /** A quote that failed for a reason we could name. */

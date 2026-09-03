@@ -146,6 +146,37 @@ is real rather than assumed — the flags live in someone else's dashboard:
 sudo -u oracle npm run bankr:scope     # asks Bankr what each key can do
 ```
 
+### Turning payment on
+
+`PRICING_MODE=paid` is what starts charging. Two things must be right first,
+and they are different doors:
+
+- **Bankr's gateway** (`x402.bankr.bot/<wallet>/vates`) collects the payment
+  and forwards the request here. Set `VATES_BACKEND_SECRET` to the same value
+  on both sides: without it this origin cannot tell a forwarded request from
+  anyone setting the same headers, so gateway callers get a 402 they cannot
+  fix. `X402_GATEWAY_URL` is advertised to callers and never called by us.
+- **Direct `exact`** needs `X402_FACILITATOR_URL` pointed at a *standard* open
+  facilitator (`https://x402.org/facilitator`). Never at Bankr — it publishes
+  no `/verify` or `/settle` for other people's servers.
+
+The same principle as `bankr:scope`: the configuration is a belief until
+something asks.
+
+```bash
+sudo -u oracle npm run x402:check      # what the facilitator actually supports
+```
+
+It reports both doors: whether the gateway secret is set, and what the
+facilitator will settle. A green facilitator means a standard client
+(`x402-fetch`) can pay per call; a red one means every priced call would answer
+402 with an error about signatures, which reads to the caller as their problem
+rather than ours.
+
+`VATES_BACKEND_SECRET` is a shared secret that lets a request skip per-call
+payment, so it belongs in `.env` with `chmod 600` and nowhere else. The gateway
+hop itself can only be confirmed with a live call — see `x402/README.md`.
+
 ## Installing
 
 Two ways in. **Cloning on the server is the simpler one** and needs no SSH

@@ -293,12 +293,42 @@ queued as a draft and requires the same human approval and the same `--live`
 as a broadcast. The listener only ever writes drafts. A mention it cannot
 answer is skipped rather than answered with a shrug.
 
+## Both protocols are quotable
+
+`GET /quote` takes a v4 poolId **or** a v3 pool address, and the response says
+which in `protocol`. That matters because v3 carries about a third of
+stock-paired volume here and four of the five largest stock-paired pools are
+v3: an endpoint that spoke only v4 was indexing the truth and publishing a
+subset of it.
+
+The two protocols differ in exactly two places, and those are the only
+branches in the handler — v4 keeps pool state behind StateView while v3 keeps
+it in the pool contract, and the v4 quoter takes a pool key while v3's takes
+(tokenIn, tokenOut, fee). Price, depth, Chainlink deviation, corporate actions
+and market hours are computed identically, which is what makes the two answers
+comparable. `impact.source` names which quoter produced a figure (`quoter` for
+v4, `quoter-v3` for v3), and a v3 answer adds `ticksCrossed` — a high count on
+a small size is the clearest signal that a pool's liquidity is fragmented.
+
+`GET /pools?symbol=NVDA` now returns identifiers, not just counts, ordered by
+measured 24h swap count. A count is not actionable: `/quote` needs an
+identifier, and until this listed some, the only way to get one was to index
+the chain yourself. NVDA has thousands of pools and all but a handful are
+empty, so the list is capped at 25 and says so.
+
+**`/prepare-swap` stays v4 only**, and a v3 pool answers `501` there rather
+than `404` — it is a pool this service will happily quote, and the honest
+reason is that v3 routes through SwapRouter02 with a plain ERC-20 approval
+instead of the UniversalRouter with Permit2. That is a different calldata
+shape, not a different address, and half-correct calldata is worse than none.
+
 ## Status
 
 - [x] Phase 1 — indexer + `/quote` + `/coverage`
 - [x] Phase 2 — `/prepare-swap` + `/gas`
 - [x] Phase 3 — corporate-action calendar + public agent with approval queue
 - [x] Genesis backfill, v3 indexing, volume measurement
+- [x] v3 pools quotable: `/quote` takes a v3 address, `/pools` lists identifiers
 - [x] `POST /ask` + Farcaster reply queue
 - [ ] Reconcile the volume gap against Bankr's figure
 - [ ] Cross-check discovery against Blockscout (blocked: free tier allows ~10
@@ -307,7 +337,13 @@ answer is skipped rather than answered with a shrug.
 - [x] Phase 4 — pricing published per response, usage accounting
 - [x] Phase 4 — deployed to oracle.sb4s.xyz
 - [ ] Phase 4 — open the skills-repo PR
-- [ ] Wire an actual payment path (x402 or key-based) and flip `PRICING_MODE=paid`
+- [x] Speak real x402: scheme `exact`, verified and settled through a facilitator
+- [x] Accept paid requests from Bankr's hosted gateway (`vates`), authenticated
+      by shared secret rather than by a header anyone can set
+- [ ] Set `VATES_BACKEND_SECRET` on both sides and confirm the gateway hop with
+      a live call
+- [ ] Point `X402_FACILITATOR_URL` at a standard facilitator, confirm with
+      `npm run x402:check`, and flip `PRICING_MODE=paid`
 
 ## Pricing
 
@@ -316,22 +352,29 @@ answer is skipped rather than answered with a shrug.
 while each response publishes what the call will cost once billing is enabled.
 
 ```
-x-oracle-price-usd: 0.01     what this route will cost
+x-oracle-price-usd: 0.02     what this route will cost
 x-oracle-charged-usd: 0      what it cost the caller today
 x-oracle-pricing: launch     the current mode
 ```
 
 Publishing the price from day one is the point. "Free" would be a promise that
 has to be broken later; a header a caller can read is a plan they can build
-against. `config/pricing.ts` holds the list, in three tiers that follow real
-upstream cost — index reads are local, chain reads cost an RPC round trip, and
-quoter simulations cost several:
+against. `config/pricing.ts` holds the list, and it is now **one price**:
 
 | Route | Price |
 |---|---|
 | `/health`, `/coverage` | free |
-| `/corporate-actions`, `/ask` | $0.005 |
-| `/gas`, `/quote`, `/prepare-swap` | $0.01 |
+| everything else priced | $0.02 |
+
+It used to be two tiers that tracked what a call costs to serve. The payment
+surface is what changed that: Bankr's gateway prices an *endpoint*, not a
+route, so a caller paying through it pays one figure whatever it calls. Two
+tiers could not be expressed there, and both alternatives were worse than a
+flat price — charge everything at the cheap tier and sell a quoter simulation
+below cost, or publish a split the gateway does not honour and let callers
+discover it by being charged something else. $0.02 is therefore the top of the
+band rather than the bottom: with one figure, the expensive routes set it,
+because the cheap ones cannot subsidise them without being sold below cost.
 
 Payment itself is deliberately not wired up yet — see the status list. What is
 wired up is the accounting: `usage` counts calls per day, route and caller, so
@@ -345,6 +388,33 @@ Callers are identified by an API-key hash when one is presented, otherwise by
 a salted hash of the remote address. The raw address is never stored — this is
 a usage counter, not a visitor log — and the per-install salt means hashes are
 not comparable across deployments.
+
+## The page a person gets
+
+`GET /` is server-rendered from live counts — the numbers are the product, and
+a figure that might be a screenshot from last month is worth less than none.
+An agent that sends `Accept: application/json` gets the service descriptor
+instead.
+
+The look is built from the agent's own logo: navy plate, silver and cyan
+blades, the ringed eye, the spark above it. The mark is redrawn as inline SVG
+(`/mark.svg`, also the favicon) rather than pasted in as a raster, so it stays
+crisp at 34px and costs nothing per request; the original image is served at
+`/logo.jpg` for social previews and the iOS home screen, which is the one
+place a raster is what the consumer wants. Dark is the native theme because
+the logo has a night sky in it, and the light theme is the same identity in
+ice rather than a second design. No external script, font or stylesheet — the
+page cannot break behind a CDN and cannot leak a visitor to a third party.
+
+**The wallet is one control, not five.** Connect, sign in, pay, paste a hash
+and claim used to be five buttons a visitor had to sequence themselves. There
+is only ever one next step, so there is one button and its label *is* that
+step; paying then claims itself by polling, because a claim only fails for the
+few seconds the transfer takes to confirm. The manual hash box is folded away
+for someone who paid from another wallet, and the Farcaster FID row appears
+only once pro is live — an input that cannot do anything yet is worse than one
+that is not there. Tables become cards under 680px and every control clears a
+42px touch target.
 
 ## Finding out what this is, as a machine
 
@@ -361,20 +431,79 @@ page does not exist for the callers this service is built for.
 
 ## Pro, and paying per call
 
-**The 402 is x402-shaped but not x402-compatible, and says so.** In the
-published protocol, scheme `exact` means a signed EIP-3009 authorization in a
-PAYMENT-SIGNATURE header that a facilitator submits. Ours is an ordinary
-on-chain transfer whose hash is presented afterwards — same intent, different
-wire protocol. It was advertised as `exact`, which would have made a standard
-client (x402-fetch, `bankr x402 call`) sign an authorization we never read and
-loop on the retry. The scheme is now named `onchain-transfer-credit` and the
-body carries `standardX402: false`, so an incompatible client fails on the
-first call with a readable reason.
+**Two doors now, and Bankr is one of them.** The 402 used to be x402-*shaped*
+and said so: an ordinary transfer whose hash was presented afterwards, honestly
+named `onchain-transfer-credit` so a standard client would fail cleanly rather
+than sign an authorization nobody read. Honest, and useless — no off-the-shelf
+client could pay it, which is the entire point of speaking the protocol.
 
-Supporting real x402 means either verifying EIP-3009 signatures and settling
-through a facilitator, or publishing a thin handler on Bankr's x402 Cloud that
-proxies to this service. The second is the smaller job and also buys
-marketplace discovery; neither is done.
+**Door 1 — Bankr's gateway**, which is what Bankr's x402 product actually is.
+Bankr hosts the payment wall in front of this service at
+`https://x402.bankr.bot/0x4b19…60ea/vates`, issues its own 402, takes the USDC
+on Base, settles it, and forwards the paid request here with `x-402-payer`
+naming who paid. Nothing about payment happens in this process on that path;
+the only question is whether the request is really from the gateway, and the
+shared secret (`VATES_BACKEND_SECRET`, sent as `x-bankr-secret`) is the answer.
+
+That secret is treated as **required**, not optional. `x-402-payer` is a plain
+string: if carrying it were enough to be served, anyone could set it and step
+around the wall, and the wall would be decoration. So an unmatched gateway
+request is unpaid, and the refusal is logged with which of the three distinct
+causes it was. The payer address is used for per-payer usage counting
+(`x402:0x…` in `npm run usage`), returned in `x-oracle-payer`, and grants no
+entitlement — a paid call is a paid call.
+
+**Door 2 — this origin speaking `exact` itself**, for callers that would rather
+pay `oracle.sb4s.xyz` than a gateway. Bankr publishes no facilitator API for
+other people's servers, so `X402_FACILITATOR_URL` is a standard open
+facilitator (Coinbase's at `https://x402.org/facilitator`, or any conforming
+one) — pointing it at Bankr would 402 every caller with an error about
+signatures. With it set, `accepts[0]` is a real `exact` requirement on `base`
+and `x402-fetch` pays this service unchanged.
+
+```
+GET /quote            → 402  { accepts: [ {scheme:"exact", …}, {scheme:"onchain-transfer-credit", …} ] }
+   sign the authorization, base64 it into X-PAYMENT, retry
+GET /quote            → 200  X-PAYMENT-RESPONSE: <base64 receipt with the settlement tx>
+```
+
+Three properties are worth stating because each is a decision:
+
+- **Verified before the work, settled after it.** Settling first charges for a
+  response that may then fail; settling after sending leaves nothing to tell
+  the caller with when settlement is refused. A refusal replaces the built
+  response with a 402, so unpaid work is never served.
+- **An authorization buys exactly one response.** EIP-3009 nonces are
+  single-use on-chain, but between verify and settle the same authorization
+  could otherwise buy two responses and pay for one. The nonce is claimed
+  locally first, and released again if settlement fails so the caller can
+  retry with the same signature.
+- **A facilitator that is down is a 503, never a 402.** Telling a caller to pay
+  again for a payment that may be perfectly good is the one answer that must
+  not be given.
+
+The EIP-712 domain a payer signs against is read off the USDC contract
+(`name()`, `version()`) rather than remembered, because a wrong domain produces
+a valid signature for a domain that does not exist and an error message about
+nothing. `npm run x402:check` asks the configured facilitator what it will
+actually settle — the same idea as `npm run bankr:scope`, and for the same
+reason: configuration is a belief until something asks.
+
+**The credit scheme stays**, for callers that would rather move USDC once than
+sign per call. `POST /x402/topup {txHash}` credits the exact base units
+transferred, with no minimum. It used to run through the subscription claim,
+which was wrong in both directions at once: a $1 transfer was refused for being
+under the $5.99 subscription price and bought nothing, while a $6 transfer
+silently granted a 30-day unmetered subscription to someone who meant to buy a
+dollar of calls. One transaction now buys one thing, and `purpose` on the
+payments row is what makes that true rather than hoped for.
+
+Both doors are documented for machines as well as for people: the 402 body and
+`/.well-known/agent.json` carry the gateway URL and whether this origin can
+authenticate it, and `GET /x402/supported` says what this deployment settles
+before a caller signs anything. `x402/README.md` has the operator's side,
+including the one thing that can only be checked with a live call — that the
+gateway preserves the request path.
 
 Two surfaces, two shapes, because they are genuinely different problems.
 
@@ -403,10 +532,10 @@ payment is how a subscription quietly becomes free.
 
 **x402 — pay per call, no account.** An agent that found this in a catalogue
 calls, gets a 402 describing exactly what to pay and where, pays, and calls
-again. Settlement is prepaid credit rather than one transfer per request: a
-USDC transfer costs more in gas and latency than a $0.005 call is worth, so a
-transfer buys a balance that calls draw down. The 402 says so in its own body
-rather than only here.
+again — either through Bankr's gateway, where Bankr does the collecting, or
+against this origin directly. `GET /x402/supported` says which schemes, which
+network and which gateway this deployment actually honours, so a client can
+find out before signing rather than after being refused.
 
 Off while `PRICING_MODE=launch` — every route is served and the 402 never
 fires, while the price headers say what it will cost.
