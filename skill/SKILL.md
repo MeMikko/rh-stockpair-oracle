@@ -153,6 +153,13 @@ instantaneous L1 reading flaps: a non-zero observation during development
 reverted to zero minutes later. `subsidy.evidence` exposes the sample count,
 window length and last non-zero observation so a caller can judge for itself.
 
+It also exposes `currentNonZeroRun` — the unbroken run of charged samples
+ending at the newest one — with `currentNonZeroRunSeconds` and `zeroSince`.
+Read those rather than the counts if you need to know whether the subsidy has
+actually lapsed: `26` non-zero out of `107` means an ended subsidy if those 26
+are the most recent 26 and a flapping reading if they are scattered, and only
+the run distinguishes the two.
+
 ### `GET /corporate-actions`
 
 ```bash

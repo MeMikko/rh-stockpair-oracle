@@ -51,11 +51,14 @@ export function templateDraft(signal: Signal): string {
              `Robinhood Chain: $${f.v3VolumeUsdMillions}M of $${f.totalVolumeUsdMillions}M ` +
              `over ${f.windowHours}h. An index that covers only v4 misses all of it.`;
     case 'gas_subsidy':
-      // "a majority of" rather than "appears to be ending": the detector only
-      // fires on a majority across at least 30 samples, and the wording should
-      // carry that evidence rather than outrun it.
-      return `Robinhood Chain is charging for L1 data in a majority of recent samples ` +
-             `(${f.nonZeroSamples} of ${f.samples}). The launch gas subsidy appears to be ending.`;
+      // "consecutive" is the word doing the work: the detector fires on an
+      // unbroken run, not on a share of the window, and a scattered majority
+      // would not have got here. The hours come from the facts because the
+      // reader needs to weigh the run against the ten-minute flaps -- and
+      // because a draft may not derive a number the facts do not carry.
+      return `Robinhood Chain has charged for L1 data in ${f.currentNonZeroRun} consecutive ` +
+             `samples over ${f.runHours} hours, with no free sample in between. The launch ` +
+             `gas subsidy appears to be ending.`;
     default:
       return signal.summary;
   }

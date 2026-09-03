@@ -28,6 +28,27 @@ export interface GasSnapshot {
   };
 }
 
+const minutes = (seconds: number) => Math.max(1, Math.round(seconds / 60));
+const at = (unix: number) => new Date(unix * 1000).toISOString().replace('.000Z', 'Z');
+
+/**
+ * Say which of the two non-free states this is.
+ *
+ * The counts alone cannot tell them apart -- 26 non-zero samples out of 107 is
+ * an ended subsidy if those 26 are the most recent ones and a flapping reading
+ * if they are scattered -- so the note leads with the run in progress and keeps
+ * the window counts as supporting detail.
+ */
+function subsidyNote(l1DataFreeNow: boolean, e: SubsidyEvidence): string {
+  if (l1DataFreeNow) {
+    return `L1 calldata charged at zero across all ${e.samples} retained sample(s): the launch subsidy is active. Costs below are L2-only and will rise when it ends.`;
+  }
+  if (e.currentNonZeroRun === 0) {
+    return `L1 calldata is zero at this block and has been unbroken since ${e.zeroSince === null ? 'the start of the window' : at(e.zeroSince)}, but ${e.nonZeroSamples} of ${e.samples} retained samples were non-zero. The reading flaps; treat the subsidy as uncertain, not ended.`;
+  }
+  return `L1 calldata is being charged, unbroken across the last ${e.currentNonZeroRun} sample(s) spanning ${minutes(e.currentNonZeroRunSeconds)} minute(s) (${e.nonZeroSamples} of ${e.samples} retained samples non-zero). The longest flap observed so far ran about ten minutes; weigh the run against that before concluding the subsidy has ended.`;
+}
+
 export async function readGas(): Promise<GasSnapshot> {
   const c = getClient();
   const [prices, l1Base, minPrice, backlog, block, gasPrice] = await Promise.all([
@@ -60,11 +81,7 @@ export async function readGas(): Promise<GasSnapshot> {
       l1DataFreeNow,
       evidence,
       expectedEnd: SUBSIDY_EXPECTED_END,
-      note: l1DataFreeNow
-        ? `L1 calldata charged at zero across all ${evidence.samples} retained sample(s): the launch subsidy is active. Costs below are L2-only and will rise when it ends.`
-        : evidence.freeAtThisBlock
-          ? `L1 calldata is zero at this block but ${evidence.nonZeroSamples} of ${evidence.samples} recent samples were non-zero. Treat the subsidy as uncertain, not ended.`
-          : `L1 calldata is being charged (${evidence.nonZeroSamples} of ${evidence.samples} recent samples non-zero). The subsidy may have ended; confirm across more samples before publishing that.`,
+      note: subsidyNote(l1DataFreeNow, evidence),
     },
   };
 }

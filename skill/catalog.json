@@ -24,7 +24,7 @@
     "POST /prepare-swap — unsigned UniversalRouter calldata, single-hop only, min-out from the quoter",
     "422 from /prepare-swap means the swap could not be bounded — do not hand-roll calldata around it",
     "Submit calldata via Bankr with chainId 4663 after your own tx validation. This service never signs or broadcasts",
-    "GET /gas — chain 4663 gas split into L2 and L1-data; subsidy flag is measured across a window, not assumed from a date",
+    "GET /gas — chain 4663 gas split into L2 and L1-data; subsidy flag is measured across a window and reports the unbroken run of charged samples, not assumed from a date",
     "GET /corporate-actions?withinDays=30 — ERC-8056 multiplier changes reprice every pool in that stock at once (NVDA: 9,669 pools)",
     "POST /ask {\"question\":\"...\"} — deterministic answer with facts + reproduce; answered:false when it cannot classify",
     "Do not compare these volume figures against another dashboard's — denominators differ; see the repo README"

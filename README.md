@@ -552,6 +552,25 @@ therefore keeps a rolling sample log and only sets `l1DataFreeNow` when *every*
 retained sample is zero; `subsidy.evidence` exposes the sample count, window
 length and last non-zero observation so a caller can judge for itself.
 
+**Counts alone are ambiguous; the run is not.** On 2026-09-03 the watcher was
+logging `26/107 samples non-zero`, which describes two entirely different
+worlds: a subsidy that lapsed two hours ago, if those 26 are the most recent
+26, and a reading that keeps blipping, if they are scattered. The counts cannot
+tell them apart. `subsidy.evidence` therefore also carries
+`currentNonZeroRun` — the unbroken run of charged samples ending at the newest
+one — with `currentNonZeroRunSeconds`, `nonZeroSince` and `zeroSince`. The
+seconds are carried alongside the count because the two are not
+interchangeable: `/gas` records a sample per request, so a burst of callers can
+stack up a long run in minutes, while a stalled watcher can stretch a handful
+of samples across hours.
+
+The agent's subsidy signal fires on that run — at least 12 consecutive charged
+samples spanning at least 3 hours — rather than on a majority of the window.
+The majority test was sound but slow: at full retention (500 samples) a genuine
+end needed roughly a day of continuous charging before the majority tipped,
+whereas a three-hour unbroken run is an order of magnitude past the longest
+flap observed so far and is a shape no flap produces.
+
 Gas estimation executes the call, so a swap estimate needs a `from` that
 actually holds and has approved the token; without one the response explains
 that rather than reporting an opaque revert.

@@ -80,10 +80,16 @@ export async function watch(opts: { intervalMs?: number; confirmations?: number 
         const g = await readGas();
         if (!g.subsidy.l1DataFreeNow) {
           const e = g.subsidy.evidence;
-          console.log(
-            `[watch] L1 calldata charged: ${g.perL1CalldataUnit} wei ` +
-              `(${e.nonZeroSamples}/${e.samples} samples non-zero)`,
-          );
+          // Leads with the run, because the counts alone do not say which of
+          // the two states this is: once a single blip lands in the window this
+          // line prints on every sample for as long as the window retains it,
+          // and "26/107 non-zero" reads the same whether the subsidy ended or
+          // the reading is flapping.
+          const state = e.currentNonZeroRun > 0
+            ? `charged: ${g.perL1CalldataUnit} wei, ${e.currentNonZeroRun} consecutive samples ` +
+              `over ${Math.round(e.currentNonZeroRunSeconds / 60)}m`
+            : `free at this block since ${e.zeroSince === null ? 'unknown' : new Date(e.zeroSince * 1000).toISOString()}`;
+          console.log(`[watch] L1 calldata ${state} (${e.nonZeroSamples}/${e.samples} retained samples non-zero)`);
         }
       } catch (err) {
         console.error('[watch] gas sample failed:', (err as Error).message.slice(0, 100));

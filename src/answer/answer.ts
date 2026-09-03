@@ -2,7 +2,7 @@ import { getDb } from '../db/index.js';
 import { classify, type Intent } from './intent.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { upcomingActions } from '../corporate/calendar.js';
-import { readGas } from '../pricing/gas.js';
+import { readGas, type GasSnapshot } from '../pricing/gas.js';
 import { feedFor } from '../registry/feeds.js';
 import { readFeed } from '../pricing/chainlink.js';
 import { marketStatus } from '../pricing/marketHours.js';
@@ -200,24 +200,8 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
       };
     }
 
-    case 'gas': {
-      const g = await readGas();
-      const e = g.subsidy.evidence;
-      return {
-        ...base,
-        facts: {
-          samples: e.samples,
-          nonZeroSamples: e.nonZeroSamples,
-          freeAcrossWindow: e.freeAcrossWindow,
-          perL1CalldataUnit: g.perL1CalldataUnit,
-          baseFeePerGas: g.baseFeePerGas,
-        },
-        text: e.freeAcrossWindow
-          ? `L1 calldata is charged at zero across all ${e.samples} retained samples: the launch subsidy is still active. Costs are L2-only and will rise when it ends.`
-          : `L1 calldata is non-zero in ${e.nonZeroSamples} of ${e.samples} retained samples. The reading flaps, so treat the subsidy as uncertain rather than ended.`,
-        reproduce: 'GET /gas',
-      };
-    }
+    case 'gas':
+      return { ...base, ...gasAnswer(await readGas()) };
 
     case 'protocol_split': {
       const { buildVolumeReport } = await import('../volume/usd.js');
@@ -286,6 +270,41 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
  * function. A template that drifts into citing a number it did not put in
  * `facts` fails here rather than in front of an audience.
  */
+/**
+ * The `/ask` answer about gas, split out from the network read so it can be
+ * exercised against a synthetic snapshot.
+ *
+ * Three states, not two. A non-zero count on its own is ambiguous between a
+ * subsidy that has lapsed and a reading that flaps, and the run in progress is
+ * what separates them -- so the answer says which one the samples actually
+ * support rather than hedging across both.
+ */
+export function gasAnswer(g: GasSnapshot): Pick<Answer, 'facts' | 'text' | 'reproduce'> {
+  const e = g.subsidy.evidence;
+  // The text quotes minutes, so minutes must be a fact. Derived at render time
+  // it was a number the facts did not carry, and the verifier -- doing exactly
+  // its job -- refused the whole answer rather than just the digit.
+  const runMinutes = Math.round(e.currentNonZeroRunSeconds / 60);
+  return {
+    facts: {
+      samples: e.samples,
+      nonZeroSamples: e.nonZeroSamples,
+      currentNonZeroRun: e.currentNonZeroRun,
+      currentNonZeroRunSeconds: e.currentNonZeroRunSeconds,
+      currentNonZeroRunMinutes: runMinutes,
+      freeAcrossWindow: e.freeAcrossWindow,
+      perL1CalldataUnit: g.perL1CalldataUnit,
+      baseFeePerGas: g.baseFeePerGas,
+    },
+    text: e.freeAcrossWindow
+      ? `L1 calldata is charged at zero across all ${e.samples} retained samples: the launch subsidy is still active. Costs are L2-only and will rise when it ends.`
+      : e.currentNonZeroRun === 0
+        ? `L1 calldata is free right now, but was non-zero in ${e.nonZeroSamples} of ${e.samples} retained samples. The reading flaps, so treat the subsidy as uncertain rather than ended.`
+        : `L1 calldata has been charged in the last ${e.currentNonZeroRun} consecutive samples, spanning ${runMinutes} minutes, with none free in between (${e.nonZeroSamples} of ${e.samples} retained samples non-zero). That is what the end of the subsidy looks like; short runs have reverted before.`,
+    reproduce: 'GET /gas',
+  };
+}
+
 export async function answerQuestion(
   question: string,
   now = new Date(),

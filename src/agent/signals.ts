@@ -25,6 +25,13 @@ export interface Signal {
  * re-running the scan does not queue the same post twice. Anything that should
  * re-fire when it changes must be part of the key.
  */
+/**
+ * Rounded to the precision a post would actually use, so the facts contain
+ * exactly the numbers the text is allowed to cite and nothing has to be
+ * derived at drafting time.
+ */
+const round1 = (n: number) => Number(n.toFixed(1));
+
 function signalId(kind: string, key: string): string {
   return createHash('sha256').update(`${kind}:${key}`).digest('hex').slice(0, 16);
 }
@@ -56,10 +63,22 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
 const PROTOCOL_SPLIT_MIN_SHARE = 0.1;
 
 /**
- * Retained gas samples required before the agent will say anything about the
- * subsidy at all. Paired with a majority test in detectGasSubsidy.
+ * How long L1 data must have been charged *without interruption* before the
+ * agent will say the subsidy has ended.
+ *
+ * Two thresholds, because samples and wall clock are not interchangeable here:
+ * `/gas` records a sample on every request, so a burst of callers can stack up
+ * a long run inside a couple of minutes, and the watcher's own sampling can
+ * stall and leave a short run spanning hours. Requiring both closes each hole.
+ *
+ * Three hours is an order of magnitude past the longest flap observed so far
+ * (about ten minutes, 2026-09-02). It replaces a majority-of-the-window test,
+ * which was sound but slow: at full retention a genuine end needed roughly a
+ * day of charging before the majority tipped, and a run says the same thing in
+ * a form that a flap cannot fake.
  */
-const GAS_SUBSIDY_MIN_SAMPLES = 30;
+const GAS_SUBSIDY_MIN_RUN_SAMPLES = 12;
+const GAS_SUBSIDY_MIN_RUN_SECONDS = 3 * 60 * 60;
 
 /**
  * Corporate action approaching on a stock that prices indexed pools.
@@ -230,10 +249,6 @@ export async function detectProtocolSplit(): Promise<Signal[]> {
   const minorShare = Math.min(v4, v3) / total;
   if (minorShare < PROTOCOL_SPLIT_MIN_SHARE) return [];
 
-  // Rounded to the precision a post would actually use, so the facts contain
-  // exactly the numbers the text is allowed to cite and nothing has to be
-  // derived at drafting time.
-  const round1 = (n: number) => Number(n.toFixed(1));
   const v3Share = Math.round((v3 / total) * 100);
 
   return [{
@@ -274,27 +289,30 @@ export async function detectGasSubsidy(): Promise<Signal[]> {
   const g = await readGas();
   const e = g.subsidy.evidence;
 
-  // Two conditions, both required, because "the subsidy has ended" is the
-  // single claim here that would be most embarrassing to get wrong and is not
-  // retractable once posted.
-  //
-  // A minimum sample count stops the agent speaking from a thin window, and a
-  // majority stops it speaking from a blip. Both are needed: the reading is
-  // known to flap -- a non-zero observation during testing reverted to zero
-  // minutes later -- so any-sample-non-zero fires on noise. At 3 of 12 the
-  // detector was drafting "the launch gas subsidy appears to be ending" off
-  // exactly the kind of transient the /gas endpoint was built to survive.
-  if (e.samples < GAS_SUBSIDY_MIN_SAMPLES) return [];
-  if (e.nonZeroSamples * 2 <= e.samples) return [];
+  // Fires on an unbroken run of charged samples, not on a share of the window.
+  // The distinction is the whole guard: a subsidy that has ended charges every
+  // sample from the moment it lapses, while a flap charges a handful and stops
+  // -- and a window share cannot tell 26-of-107-most-recent from
+  // 26-of-107-scattered. "The subsidy has ended" is the claim here that would
+  // be most embarrassing to get wrong and cannot be retracted once posted, so
+  // the run must clear both a sample count and a wall-clock span before the
+  // agent will draft it.
+  if (e.currentNonZeroRun < GAS_SUBSIDY_MIN_RUN_SAMPLES) return [];
+  if (e.currentNonZeroRunSeconds < GAS_SUBSIDY_MIN_RUN_SECONDS) return [];
+
+  const runHours = round1(e.currentNonZeroRunSeconds / 3600);
 
   return [{
-    // Keyed on the counts, so a changed balance of evidence is a new
-    // observation rather than a silent no-op against an existing post.
-    id: signalId('gas_subsidy', `ended:${e.nonZeroSamples}/${e.samples}`),
+    // Keyed on when the run began, which is stable for as long as it lasts.
+    // Keying on the counts instead queued a fresh draft on every scan, since
+    // both move with each new sample; a break in the run starts a new run, and
+    // that is the genuinely new observation.
+    id: signalId('gas_subsidy', `ended:since:${e.nonZeroSince}`),
     kind: 'gas_subsidy',
     severity: 'high',
-    summary: `L1 data is being charged in ${e.nonZeroSamples} of ${e.samples} recent samples; the launch subsidy may have ended`,
+    summary: `L1 data has been charged in ${e.currentNonZeroRun} consecutive samples over ${runHours}h; the launch subsidy may have ended`,
     facts: {
+      currentNonZeroRun: e.currentNonZeroRun, runHours,
       nonZeroSamples: e.nonZeroSamples, samples: e.samples,
       windowSeconds: e.windowSeconds,
       perL1CalldataUnit: g.perL1CalldataUnit,
