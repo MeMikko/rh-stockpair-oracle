@@ -84,15 +84,25 @@ Traffic that arrives this way is counted in `npm run usage` under the payer's
 own address, so the share of demand coming through Bankr is visible rather than
 merged into the direct traffic.
 
-## One handler, one price
+## One handler, one price — and what that keeps out
 
 Bankr prices an endpoint, not a route. That is why the origin now charges one
 figure — $0.02 — for every priced route rather than the two tiers it used to
 publish: a split the gateway cannot express would be a published price callers
 are not charged.
 
-`/health` and `/coverage` are free at the origin and still cost $0.02 through
-the gateway, because the gateway prices the endpoint. Call those directly.
+The same fact is why **`/health` and `/coverage` are not proxied at all**. They
+are free at the origin, and one price for the endpoint would mean selling them
+for $0.02 — charging for the two things this service gives away. The handler
+refuses them with the direct URL instead:
+
+```
+https://oracle.sb4s.xyz/health      index freshness, cursors with lag in seconds
+https://oracle.sb4s.xyz/coverage    which of the 194 stock tokens have a feed
+```
+
+Being refused costs nothing. Bankr settles only on a response under 400, so the
+refusal is a free answer that names where to look — not a paid error.
 
 ## Costs
 

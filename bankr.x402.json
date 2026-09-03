@@ -3,7 +3,7 @@
   "currency": "USDC",
   "services": {
     "vates": {
-      "description": "Stock-pair oracle for Robinhood Chain (4663): implied USD price, pool depth, price impact from an on-chain quoter, deviation vs Chainlink, whether the underlying market is open, and upcoming corporate actions. Uniswap v4 AND v3 — v3 carries roughly a third of stock-paired volume. Deterministic; no model in the data path.",
+      "description": "Stock-pair oracle for Robinhood Chain (4663): implied USD price, pool depth, price impact from an on-chain quoter, deviation vs Chainlink, whether the underlying market is open, and upcoming corporate actions. Uniswap v4 AND v3 — v3 carries roughly a third of stock-paired volume. Deterministic; no model in the data path. Index freshness (/health) and Chainlink coverage (/coverage) are free at oracle.sb4s.xyz and are deliberately not sold through this endpoint.",
       "price": "0.02",
       "methods": ["GET", "POST"],
       "category": "data",
@@ -21,7 +21,7 @@
           "properties": {
             "route": {
               "type": "string",
-              "description": "Which oracle route to call. Defaults to /quote.",
+              "description": "Which oracle route to call. Defaults to /quote. /health and /coverage are free and are NOT sold here — call https://oracle.sb4s.xyz/health and /coverage directly.",
               "enum": [
                 "/quote",
                 "/gas",
@@ -29,9 +29,8 @@
                 "/pools",
                 "/volume",
                 "/corporate-actions",
-                "/coverage",
                 "/ask",
-                "/health"
+                "/prepare-swap"
               ]
             },
             "pool": {

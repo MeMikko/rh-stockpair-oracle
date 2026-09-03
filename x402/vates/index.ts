@@ -18,6 +18,12 @@
  * is why this service and the origin both charge one figure for everything
  * priced ($0.02) instead of the two tiers the origin used to publish.
  *
+ * The same fact is why `/health` and `/coverage` are not reachable here at all.
+ * They are free at the origin, and one price for the endpoint would mean
+ * selling them for $0.02 — so the handler refuses them and says where they are
+ * free, which costs the caller nothing because Bankr settles only a response
+ * under 400.
+ *
  * Deploy from the repo root, with the Bankr CLI authenticated:
  *
  *   bankr x402 env set VATES_BACKEND_SECRET=<same value as the origin's .env>
@@ -37,11 +43,22 @@ const ROUTES = new Set([
   '/pools',
   '/volume',
   '/corporate-actions',
-  '/coverage',
   '/ask',
   '/prepare-swap',
-  '/health',
 ]);
+
+/**
+ * Free at the origin, and deliberately NOT proxied.
+ *
+ * Bankr prices an endpoint rather than a route, so anything reachable through
+ * here costs the endpoint's price. Passing a free route through would sell it
+ * for $0.02 — a caller checking index freshness, or reading which stock tokens
+ * have a Chainlink feed, would be charged for something the origin gives away.
+ *
+ * Refusing costs the caller nothing: Bankr settles only on a response under
+ * 400, so a 400 here is a free answer that names where to get these for free.
+ */
+const FREE_AT_ORIGIN = new Set(['/health', '/coverage']);
 
 /** Routes that take a body. Everything else is a GET with a query string. */
 const POST_ROUTES = new Set(['/ask', '/prepare-swap']);
@@ -72,10 +89,23 @@ export default async function handler(request: Request): Promise<Response> {
   // one endpoint, not a path space: ?route=/quote&pool=0x…
   const route = url.searchParams.get('route') ?? '/quote';
 
+  if (FREE_AT_ORIGIN.has(route)) {
+    return json(400, {
+      error: `${route} is free at the origin and is not sold here`,
+      callInstead: `${ORIGIN}${route}`,
+      why:
+        'This endpoint has one price for everything it serves, so proxying a free route ' +
+        'would charge for something the origin gives away. Nothing was settled for this ' +
+        'request.',
+      routes: [...ROUTES],
+    });
+  }
+
   if (!ROUTES.has(route)) {
     return json(400, {
       error: `route ${route} is not proxied here`,
       routes: [...ROUTES],
+      free: [...FREE_AT_ORIGIN].map((r) => `${ORIGIN}${r}`),
       hint: 'pass ?route=/quote and that route’s own parameters alongside it',
     });
   }
