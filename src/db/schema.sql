@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS feeds (
   threshold       REAL    NOT NULL,
   market_hours    TEXT,                  -- e.g. us_equities_24/5
   name            TEXT NOT NULL,
+  -- 'stock' is a Robinhood equity feed and counts toward /coverage.
+  -- 'reference' is a feed kept only to price the OTHER side of a pool (ETH/USD),
+  -- and must never be counted as coverage of a stock token or answer /price.
+  kind            TEXT NOT NULL DEFAULT 'stock',
   synced_at       INTEGER NOT NULL
 );
 

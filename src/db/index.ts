@@ -62,6 +62,12 @@ function migrate(db: DatabaseSync): void {
   if (!columns('payments').has('purpose')) {
     db.exec("ALTER TABLE payments ADD COLUMN purpose TEXT NOT NULL DEFAULT 'pro'");
   }
+
+  // Every feed stored before reference feeds existed was a Robinhood equity
+  // feed, which is what the default says, so the backfill is the default.
+  if (!columns('feeds').has('kind')) {
+    db.exec("ALTER TABLE feeds ADD COLUMN kind TEXT NOT NULL DEFAULT 'stock'");
+  }
 }
 
 export function getCursor(stream: string): number | null {
