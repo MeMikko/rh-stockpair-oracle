@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import {
   adminConfig,
@@ -12,6 +13,8 @@ import { adminPage } from './page.js';
 import { adminKeyConfigured, bankr } from '../../config/bankr.js';
 import {
   BankrError,
+  agentJob,
+  agentPrompt,
   claimFees,
   deployToken,
   launches,
@@ -21,8 +24,23 @@ import {
   walletMe,
   type DeployRequest,
 } from '../bankr/client.js';
-import { decide, listPosts } from '../agent/queue.js';
+import { decide, enqueue, listPosts } from '../agent/queue.js';
 import { fetchLlmSpend } from '../llm/spend.js';
+import { MAX_POST_LENGTH, verifyDraft } from '../agent/verify.js';
+import { loadSignal, saveSignals, type Signal } from '../agent/signals.js';
+import {
+  fetchMentions,
+  neynarConfigured,
+  questionFromCast,
+  saveMentionSignal,
+  signalForMention,
+  unanswered,
+  type Mention,
+} from '../agent/mentions.js';
+import { aboutFacts } from '../answer/conversational.js';
+import { answerQuestion } from '../answer/answer.js';
+import { tierForFid } from '../entitlements/index.js';
+import { getDb } from '../db/index.js';
 
 /**
  * The operator panel.
@@ -123,6 +141,13 @@ export function buildAdminServer(): FastifyInstance {
   });
 
   const owner = (req: FastifyRequest): string => (req as unknown as { owner: string }).owner;
+
+  /** The same channel list the scanner and the webhook queue against. */
+  const channels = (): string[] =>
+    (process.env.AGENT_CHANNELS ?? 'farcaster')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
 
   /* ------------------------------------------------------------ sign-in -- */
 
@@ -343,6 +368,221 @@ export function buildAdminServer(): FastifyInstance {
     } catch (err) {
       return sendBankrError(reply, err);
     }
+  });
+
+  /* ------------------------------------------------- talking to Bankr -- */
+
+  /**
+   * A sentence to Bankr's own agent.
+   *
+   * Not a chat with Vates — Vates has no chat; it reads signals and drafts.
+   * This is the wallet's own agent, and with a read-write key it *executes*:
+   * "sell all my BNKR" is a trade, not a question. Every prompt is logged
+   * with the address that sent it, because a panel that can spend should
+   * leave a record of who asked.
+   */
+  app.post('/admin/agent/prompt', async (req, reply) => {
+    const b = req.body as { prompt?: string; threadId?: string } | undefined;
+    const prompt = b?.prompt?.trim() ?? '';
+    if (!prompt) return reply.code(400).send({ error: 'body must be {"prompt": "…"}' });
+    if (prompt.length > 10_000) {
+      return reply.code(400).send({ error: 'Bankr caps a prompt at 10,000 characters' });
+    }
+    try {
+      const job = await agentPrompt(prompt, b?.threadId?.trim() || undefined);
+      req.log.info(`agent prompt by ${owner(req)}: ${prompt.slice(0, 160)}`);
+      return job;
+    } catch (err) {
+      return sendBankrError(reply, err);
+    }
+  });
+
+  app.get('/admin/agent/job/:jobId', async (req, reply) => {
+    try {
+      return await agentJob((req.params as { jobId: string }).jobId);
+    } catch (err) {
+      return sendBankrError(reply, err);
+    }
+  });
+
+  /* ------------------------------------------------- composing a post -- */
+
+  /** Signals the scanner has recorded, and whether each already has a post. */
+  app.get('/admin/signals', async () => {
+    const rows = getDb()
+      .prepare(
+        `SELECT s.id, s.kind, s.severity, s.summary, s.facts_json, s.reproduce, s.detected_at,
+                (SELECT p.id FROM posts p WHERE p.signal_id = s.id) AS post_id
+         FROM signals s ORDER BY s.detected_at DESC LIMIT 25`,
+      )
+      .all() as unknown as Array<Record<string, unknown>>;
+    return {
+      signals: rows.map((r) => ({
+        id: String(r.id),
+        kind: String(r.kind),
+        severity: String(r.severity),
+        summary: String(r.summary),
+        reproduce: String(r.reproduce),
+        detectedAt: Number(r.detected_at),
+        facts: JSON.parse(String(r.facts_json)) as Record<string, unknown>,
+        queuedAs: r.post_id ? String(r.post_id) : null,
+      })),
+    };
+  });
+
+  /**
+   * The facts a given draft may cite.
+   *
+   * Attached to a signal, that is the signal's own facts. Free-standing, it is
+   * the same curated snapshot the conversational path uses — narrow on
+   * purpose. An operator writing by hand is held to exactly the rule the model
+   * is held to: a number that is not in the facts does not go out.
+   */
+  const factsFor = (signalId: string | undefined): Record<string, unknown> | null => {
+    if (!signalId) return aboutFacts();
+    const signal = loadSignal(signalId);
+    return signal ? signal.facts : null;
+  };
+
+  app.post('/admin/compose/check', async (req, reply) => {
+    const b = req.body as { signalId?: string; text?: string } | undefined;
+    const facts = factsFor(b?.signalId?.trim() || undefined);
+    if (!facts) return reply.code(404).send({ error: 'no signal with that id' });
+    return {
+      verification: verifyDraft(b?.text ?? '', facts),
+      facts,
+      maxLength: MAX_POST_LENGTH,
+    };
+  });
+
+  app.post('/admin/compose', async (req, reply) => {
+    const b = req.body as { signalId?: string; text?: string; reproduce?: string } | undefined;
+    const text = b?.text?.trim() ?? '';
+    if (!text) return reply.code(400).send({ error: 'nothing to queue' });
+
+    const signalId = b?.signalId?.trim() || undefined;
+    const facts = factsFor(signalId);
+    if (!facts) return reply.code(404).send({ error: 'no signal with that id' });
+
+    const verification = verifyDraft(text, facts);
+    if (!verification.ok) {
+      // The same two failures the webhook reports separately, for the same
+      // reason: "failed verification" with an empty list explains nothing.
+      return reply.code(400).send({
+        error: verification.unsupported.length
+          ? `numbers not in the facts: ${verification.unsupported.join(', ')}`
+          : `too long for a cast: ${verification.length}/${MAX_POST_LENGTH}`,
+        verification,
+      });
+    }
+
+    // A hand-written post still needs a signal, because the queue keys on one
+    // and because a post with no recorded basis is the thing this project does
+    // not publish. Writing the basis down makes it explicit rather than
+    // implicit in someone's memory.
+    let id = signalId;
+    if (!id) {
+      const signal: Signal = {
+        id: createHash('sha256').update(`operator:${text}`).digest('hex').slice(0, 16),
+        kind: 'operator_note',
+        severity: 'info',
+        summary: `written by ${owner(req)}`,
+        facts: facts as Record<string, string | number | boolean | null>,
+        reproduce: b?.reproduce?.trim() || 'GET /health',
+        detectedAt: Date.now(),
+      };
+      saveSignals([signal]);
+      id = signal.id;
+    }
+
+    const post = enqueue(id, { text, draftedBy: `operator:${owner(req)}`, verification }, channels());
+    if (!post) return reply.code(409).send({ error: 'that signal already has a post in the queue' });
+    req.log.info(`queued a hand-written post ${post.id} by ${owner(req)}`);
+    return { ok: true, post };
+  });
+
+  /* ----------------------------------------------------------- mentions -- */
+
+  /**
+   * Mentions are cached server-side between the list and the reply.
+   *
+   * Not for speed. The FID decides the asker's tier, and the tier decides
+   * whether the model may answer at all — so taking the FID back from the
+   * browser would let whoever holds the panel hand themselves a subscriber's
+   * treatment. It comes from Neynar or it does not come.
+   */
+  const seen = new Map<string, Mention>();
+
+  app.get('/admin/mentions', async (_req, reply) => {
+    const fid = process.env.NEYNAR_AGENT_FID?.trim();
+    if (!neynarConfigured() || !fid) {
+      return reply
+        .code(503)
+        .send({ error: 'NEYNAR_API_KEY and NEYNAR_AGENT_FID are needed to read mentions' });
+    }
+    try {
+      const all = await fetchMentions(fid);
+      seen.clear();
+      for (const m of all) seen.set(m.hash, m);
+      return {
+        pending: unanswered(all).map((m) => ({
+          hash: m.hash,
+          author: m.author,
+          text: m.text,
+          question: questionFromCast(m.text),
+          timestamp: m.timestamp,
+        })),
+        total: all.length,
+      };
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message });
+    }
+  });
+
+  /**
+   * Answer one mention and put the reply in the queue.
+   *
+   * The same path the webhook takes, minus the autonomous branch: from here a
+   * reply is always queued, because a person is already sitting in front of it.
+   */
+  app.post('/admin/mentions/:hash/queue', async (req, reply) => {
+    const hash = (req.params as { hash: string }).hash;
+    const mention = seen.get(hash);
+    if (!mention) return reply.code(404).send({ error: 'reload the mention list first' });
+
+    const { signal, answered, conversational } = await signalForMention(mention);
+    if (!answered && !conversational) {
+      return { queued: false, reason: 'the classifier could not route this; saying nothing' };
+    }
+
+    const tier = mention.authorFid ? tierForFid(mention.authorFid).tier : 'free';
+    const a = await answerQuestion(questionFromCast(mention.text), new Date(), { tier });
+    const verification = verifyDraft(a.text, signal.facts);
+    if (!verification.ok) {
+      return {
+        queued: false,
+        reason: verification.unsupported.length
+          ? `the answer cited numbers not in its facts: ${verification.unsupported.join(', ')}`
+          : `the answer is too long for a cast: ${verification.length}/${MAX_POST_LENGTH}`,
+        text: a.text,
+      };
+    }
+
+    saveMentionSignal(signal);
+    const post = enqueue(
+      signal.id,
+      { text: a.text, draftedBy: 'answer', verification },
+      channels(),
+      mention.hash,
+    );
+    req.log.info(`queued a reply to @${mention.author} by ${owner(req)}`);
+    return {
+      queued: Boolean(post),
+      reason: post ? undefined : 'already queued',
+      post,
+      text: a.text,
+      reproduce: a.reproduce,
+    };
   });
 
   return app;

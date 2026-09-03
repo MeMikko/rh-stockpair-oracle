@@ -25,6 +25,7 @@ const {
   issueAdminNonce, mintAdminSession, readAdminSession, verifyAdminSignIn,
 } = await import('../src/admin/auth.js');
 const { mintSession, signInMessage, issueNonce } = await import('../src/auth/session.js');
+const { buildAdminServer } = await import('../src/admin/server.js');
 const { assertLlmOnlyProcess } = await import('../config/bankr.js');
 
 const signInAs = async (account: typeof owner, nonce: string) =>
@@ -136,5 +137,79 @@ describe('key separation', () => {
     }
 
     expect(() => assertLlmOnlyProcess()).not.toThrow();
+  });
+});
+
+describe('the composer holds a person to the same rule as the model', () => {
+  /**
+   * The whole point of letting an operator write by hand is that it is not a
+   * bypass. A number that is not in the facts is refused here exactly as it is
+   * refused in a drafted post, and the refusal names the number.
+   */
+  it('refuses a hand-written post citing a number that is not in the facts', async () => {
+    const app = buildAdminServer();
+    app.log.level = 'silent';
+    try {
+      const nonceRes = await app.inject(`/admin/nonce?address=${owner.address}`);
+      const { nonce, message } = JSON.parse(nonceRes.body) as { nonce: string; message: string };
+      const verify = await app.inject({
+        method: 'POST',
+        url: '/admin/verify',
+        payload: { address: owner.address, signature: await owner.signMessage({ message }), nonce },
+      });
+      const cookie = String(verify.headers['set-cookie']).split(';')[0]!;
+
+      const bad = await app.inject({
+        method: 'POST',
+        url: '/admin/compose',
+        headers: { cookie },
+        payload: { text: 'We index 999999 stock-paired pools.' },
+      });
+      expect(bad.statusCode).toBe(400);
+      expect(JSON.parse(bad.body).error).toContain('999999');
+
+      // Over-length is a different failure and is reported as one, rather
+      // than as an empty list of unsupported numbers.
+      const long = await app.inject({
+        method: 'POST',
+        url: '/admin/compose',
+        headers: { cookie },
+        payload: { text: 'x'.repeat(400) },
+      });
+      expect(JSON.parse(long.body).error).toMatch(/too long/);
+
+      const ok = await app.inject({
+        method: 'POST',
+        url: '/admin/compose',
+        headers: { cookie },
+        payload: { text: 'Stock-paired pools on Robinhood Chain, across both Uniswap versions.' },
+      });
+      expect(ok.statusCode).toBe(200);
+      expect(JSON.parse(ok.body).post.draftedBy).toBe(`operator:${owner.address.toLowerCase()}`);
+
+      // A queue keyed on one post per signal means the same note twice is a
+      // conflict, not a second post.
+      const again = await app.inject({
+        method: 'POST',
+        url: '/admin/compose',
+        headers: { cookie },
+        payload: { text: 'Stock-paired pools on Robinhood Chain, across both Uniswap versions.' },
+      });
+      expect(again.statusCode).toBe(409);
+    } finally {
+      await app.close();
+    }
+  });
+
+  /** An unsigned caller reaches none of it. */
+  it('refuses to compose without an owner session', async () => {
+    const app = buildAdminServer();
+    app.log.level = 'silent';
+    try {
+      const res = await app.inject({ method: 'POST', url: '/admin/compose', payload: { text: 'hi' } });
+      expect(res.statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
   });
 });

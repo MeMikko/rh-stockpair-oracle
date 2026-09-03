@@ -171,6 +171,36 @@ export interface ClaimResult {
 export const claimFees = (tokenAddress: string): Promise<ClaimResult> =>
   call<ClaimResult>(`/token-launches/${tokenAddress}/fees/claim`, { method: 'POST', body: {} });
 
+/* ---------------------------------------------------------- agent API -- */
+
+export interface AgentJob {
+  jobId?: string;
+  threadId?: string;
+  status?: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+  prompt?: string;
+  response?: string;
+  error?: string;
+  processingTime?: number;
+}
+
+/**
+ * Hand a sentence to Bankr's own agent.
+ *
+ * Asynchronous by design at their end: this returns a jobId and the answer
+ * arrives by polling. Worth being blunt about what it is — with a read-write
+ * key the agent *executes*, so "sell all my BNKR" is a trade and not a
+ * question. Requires agentApiEnabled on the key, which is off by default, and
+ * a Bankr Club subscription or Max Mode credits.
+ */
+export const agentPrompt = (prompt: string, threadId?: string): Promise<AgentJob> =>
+  call<AgentJob>('/agent/prompt', {
+    method: 'POST',
+    body: threadId ? { prompt, threadId } : { prompt },
+  });
+
+export const agentJob = (jobId: string): Promise<AgentJob> =>
+  call<AgentJob>(`/agent/job/${encodeURIComponent(jobId)}`);
+
 /* ------------------------------------------------------------ capability -- */
 
 /**

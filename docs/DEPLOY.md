@@ -371,6 +371,16 @@ different secret from the public site, so neither a public session nor a
 signature captured there is worth anything here. An empty allowlist means the
 panel refuses to start.
 
+What the panel does, beyond the wallet: a prompt box for **Bankr's own agent**
+(balances, fees, a launch, in plain language — and with a read-write key it
+executes rather than answers, so every prompt is logged against the address
+that sent it); a **composer** for writing a post by hand, held to the same
+verifier as a drafted one, queued rather than published; and a **mentions**
+view that drafts a reply through the same classifier the webhook uses.
+
+Nothing there publishes. Sending is still `npm run agent:publish -- --live`,
+run by a person on the box.
+
 Launching a token from the panel simulates by default; a real deploy needs the
 symbol typed back verbatim. Deploys are irreversible and capped at three
 counted attempts per rolling 24 hours per wallet, and on Robinhood Chain they

@@ -50,6 +50,44 @@ export function adminPage(): string {
     <h2>Approval queue</h2>
     <div class="panel" id="queue">…</div>
 
+    <h2>Talk to Bankr <span class="sub">the wallet's agent, not ${agentIdentity.name}</span></h2>
+    <p class="lede">
+      Plain language to the account that holds the funds: balances, fees, a
+      launch. With a read-write key it <em>executes</em> — "sell all my BNKR"
+      is a trade, not a question. Every prompt is logged against your address.
+    </p>
+    <div class="panel">
+      <div class="row"><input type="text" id="prompt" placeholder="what are my balances?"></div>
+      <div class="row"><button id="send" class="primary">Send</button><span class="sub" id="thread"></span></div>
+      <div id="agentout"></div>
+    </div>
+
+    <h2>Write a post</h2>
+    <p class="lede">
+      Held to the same rule as a drafted one: every number must appear in the
+      facts below, or it does not go out. Queues for approval — it never
+      publishes. Sending still needs <code>agent:publish -- --live</code>.
+    </p>
+    <div class="panel">
+      <div class="row">
+        <select id="signal"><option value="">no signal — the service snapshot</option></select>
+      </div>
+      <div class="row"><textarea id="ptext" rows="3" placeholder="the post"></textarea></div>
+      <div class="row">
+        <button id="check">Check the numbers</button>
+        <button id="queue" class="primary">Queue for approval</button>
+      </div>
+      <div id="composeout"></div>
+    </div>
+
+    <h2>Mentions</h2>
+    <p class="lede">
+      Where ${agentIdentity.name} has been tagged and has not answered. Drafting
+      one runs the same classifier and verifier the webhook does; the reply
+      lands in the queue rather than going out.
+    </p>
+    <div class="panel"><button id="loadmentions">Load mentions</button><div id="mentions"></div></div>
+
     <h2>Launch a token</h2>
     <p class="lede">
       Defaults to Robinhood Chain — the chain this service indexes, so the pool
@@ -107,14 +145,20 @@ button[disabled]{opacity:.45;cursor:not-allowed}
 .pill{font-size:.78rem;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:4px 11px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin:0 0 6px}
 .row{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}
-input[type=text],select{flex:1;min-width:170px;padding:10px 12px;font:inherit;color:var(--fg);
-background:var(--bg);border:1px solid var(--line);border-radius:8px}
+input[type=text],select,textarea{flex:1;min-width:170px;padding:10px 12px;font:inherit;color:var(--fg);
+background:var(--bg);border:1px solid var(--line);border-radius:8px;resize:vertical}
+textarea{width:100%;font-family:inherit}
+em{color:var(--fg);font-style:normal;font-weight:600}
 pre{font-family:var(--mono);font-size:.8rem;white-space:pre-wrap;word-break:break-word;margin:10px 0 0;color:var(--dim)}
 table{width:100%;border-collapse:collapse;font-size:.87rem}
 td,th{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--dim);font-weight:500;font-size:.75rem;text-transform:uppercase;letter-spacing:.04em}
 code{font-family:var(--mono);font-size:.84em}
 .note{border-left:2px solid var(--line);padding-left:15px;color:var(--dim);margin:10px 0 0}
+.ans{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px 14px;
+margin-top:10px;white-space:pre-wrap}
+details{margin-top:10px}
+summary{cursor:pointer;color:var(--dim);font-size:.8rem}
 .err{color:var(--danger)}
 .ok{color:var(--acc)}
 `;
@@ -219,6 +263,8 @@ function script(): string {
       });
     });
 
+    loadSignals();
+
     section('launches','/admin/launches', function(b){
       return '<table><tr><th>token</th><th>chain</th><th>status</th></tr>'+
         b.launches.map(function(l){
@@ -227,6 +273,106 @@ function script(): string {
         }).join('')+'</table>';
     });
   }
+
+  // ---- Bankr's own agent ----
+  var thread = null;
+
+  async function poll(jobId, n){
+    if (n > 90) {
+      $('agentout').innerHTML = '<div class="err">gave up after three minutes; the job may still finish</div>';
+      return;
+    }
+    var r = await api('/admin/agent/job/'+encodeURIComponent(jobId));
+    var s = r.body.status;
+    if (s === 'completed'){ $('agentout').innerHTML = '<div class="ans">'+esc(r.body.response||'(empty)')+'</div>'; return; }
+    if (s === 'failed' || s === 'cancelled'){ $('agentout').innerHTML = '<div class="err">'+esc(r.body.error||s)+'</div>'; return; }
+    $('agentout').innerHTML = '<span class="sub">'+esc(s||'pending')+'… '+(n*2)+'s</span>';
+    setTimeout(function(){ poll(jobId, n+1); }, 2000);
+  }
+
+  $('send').onclick = async function(){
+    var prompt = $('prompt').value.trim();
+    if (!prompt) return;
+    $('agentout').innerHTML = '<span class="sub">sending…</span>';
+    var body = thread ? {prompt:prompt, threadId:thread} : {prompt:prompt};
+    var r = await api('/admin/agent/prompt', {method:'POST', body: JSON.stringify(body)});
+    if (r.status !== 200){
+      $('agentout').innerHTML = '<div class="err">'+esc(r.body.error||'failed')+'</div>'
+        + (r.body.hint ? '<div class="note">'+esc(r.body.hint)+'</div>' : '');
+      return;
+    }
+    thread = r.body.threadId || thread;
+    $('thread').textContent = thread ? 'thread '+thread : '';
+    poll(r.body.jobId, 0);
+  };
+
+  // ---- writing a post ----
+  async function loadSignals(){
+    var r = await api('/admin/signals');
+    if (r.status !== 200) return;
+    $('signal').innerHTML = '<option value="">no signal — the service snapshot</option>' +
+      r.body.signals.map(function(s){
+        return '<option value="'+esc(s.id)+'">'+esc(s.kind)+' · '+esc(s.summary.slice(0,70))+
+          (s.queuedAs ? ' (already queued)' : '')+'</option>';
+      }).join('');
+  }
+
+  $('check').onclick = async function(){
+    var r = await api('/admin/compose/check', {method:'POST',
+      body: JSON.stringify({signalId:$('signal').value, text:$('ptext').value})});
+    if (r.status !== 200){ $('composeout').innerHTML = '<div class="err">'+esc(r.body.error)+'</div>'; return; }
+    var v = r.body.verification;
+    $('composeout').innerHTML =
+      (v.ok
+        ? '<div class="ok">passes — every number is in the facts, '+v.length+'/'+r.body.maxLength+' chars</div>'
+        : '<div class="err">'+(v.unsupported.length
+            ? 'not in the facts: '+esc(v.unsupported.join(', '))
+            : 'too long for a cast: '+v.length+'/'+r.body.maxLength)+'</div>')
+      + '<details><summary>the numbers this may cite</summary>'+j(r.body.facts)+'</details>';
+  };
+
+  $('queue').onclick = async function(){
+    var r = await api('/admin/compose', {method:'POST',
+      body: JSON.stringify({signalId:$('signal').value, text:$('ptext').value})});
+    if (r.status === 200){
+      $('composeout').innerHTML = '<div class="ok">queued as '+esc(r.body.post.id)+' — approve it in the queue above</div>';
+      $('ptext').value = '';
+      loadAll();
+    } else {
+      $('composeout').innerHTML = '<div class="err">'+esc(r.body.error||'failed')+'</div>';
+    }
+  };
+
+  // ---- mentions ----
+  $('loadmentions').onclick = async function(){
+    $('mentions').innerHTML = '<span class="sub">asking Neynar…</span>';
+    var r = await api('/admin/mentions');
+    if (r.status !== 200){ $('mentions').innerHTML = '<div class="err">'+esc(r.body.error)+'</div>'; return; }
+    if (!r.body.pending.length){
+      $('mentions').innerHTML = '<span class="sub">nothing unanswered ('+r.body.total+' mentions seen)</span>';
+      return;
+    }
+    $('mentions').innerHTML = r.body.pending.map(function(m){
+      return '<div class="panel"><div>@'+esc(m.author)+': '+esc(m.text)+'</div>'+
+        '<div class="sub">reads as: '+esc(m.question)+'</div>'+
+        '<div class="row" style="margin-top:8px"><button data-mention="'+esc(m.hash)+'">Draft a reply</button></div></div>';
+    }).join('');
+    Array.prototype.forEach.call(document.querySelectorAll('[data-mention]'), function(btn){
+      btn.onclick = async function(){
+        btn.disabled = true; btn.textContent = 'drafting…';
+        var res = await api('/admin/mentions/'+encodeURIComponent(btn.getAttribute('data-mention'))+'/queue',
+          {method:'POST', body: JSON.stringify({})});
+        var out = document.createElement('div');
+        out.innerHTML = res.body.queued
+          ? '<div class="ok">queued</div><div class="ans">'+esc(res.body.text||'')+'</div>'
+          : '<div class="err">'+esc(res.body.reason||res.body.error||'failed')+'</div>'
+            + (res.body.text ? '<div class="ans">'+esc(res.body.text)+'</div>' : '');
+        btn.parentNode.appendChild(out);
+        btn.textContent = 'Draft a reply'; btn.disabled = false;
+        loadAll();
+      };
+    });
+  };
 
   $('scopebtn').onclick = async function(){
     $('scope').innerHTML = '<span class="sub">asking Bankr…</span>';
