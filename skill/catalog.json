@@ -12,8 +12,8 @@
   "setup": [
     "Base URL: https://oracle.sb4s.xyz — read-only, no key needed in launch mode",
     "START HERE: GET /.well-known/agent.json — machine-readable endpoints, auth methods, payment details and limits. Also GET / with Accept: application/json",
-    "Pay through Bankr: call https://x402.bankr.bot/0x4b19ee2a3de2521a3adc901989944c209c0a60ea/vates instead of the origin — Bankr issues the 402, settles USDC on Base and forwards the paid request. Same routes, same responses",
-    "Auth, all live: x402 scheme `exact` settled through a standard open facilitator when paying the origin directly (402 -> sign EIP-3009 -> retry with base64 X-PAYMENT; x402-fetch works as-is); prepaid credit for callers that prefer one transfer (POST /x402/topup); wallet signature for a session; $5.99/30d pro for direct Farcaster answers",
+    "Pay through Bankr: call https://x402.bankr.bot/0x4b19ee2a3de2521a3adc901989944c209c0a60ea/vates/<route> instead of the origin — Bankr issues the 402, settles USDC on Base and forwards the paid request. Same routes under the same paths, same responses. It charges for /health and /coverage too, which are free here: call those directly at https://oracle.sb4s.xyz",
+    "Auth: x402 scheme `exact` settled through a standard open facilitator when paying the origin directly, offered only when a facilitator that settles it is configured -- check GET /x402/supported before signing (402 -> sign EIP-3009 -> retry with base64 X-PAYMENT; x402-fetch works as-is); prepaid credit for callers that prefer one transfer (POST /x402/topup); wallet signature for a session; $5.99/30d pro for direct Farcaster answers",
     "GET /x402/supported — which schemes and network this deployment actually settles, before you sign anything",
     "NOT a free service: $0.02 per priced call ($0 in launch mode, which is current). Every response carries x-oracle-price-usd, x-oracle-charged-usd and x-oracle-pricing — read them, do not hardcode a price",
     "Chain: Robinhood (4663) — abort if the Bankr wallet does not support 4663",

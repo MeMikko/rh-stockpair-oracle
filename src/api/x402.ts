@@ -395,6 +395,28 @@ export function registerX402(app: FastifyInstance): void {
     };
   });
 
+  /**
+   * A free route reached through Bankr's gateway, which charged for it anyway.
+   *
+   * The deployed gateway is a path-preserving reverse proxy with its 402 in
+   * front of the whole path space, so `…/vates/health` costs $0.02 — measured
+   * 2026-09-03, resource `…/vates/health` in its own 402 body. This origin
+   * cannot prevent that: Bankr settles before the request arrives, and there
+   * is nothing here to refund.
+   *
+   * What it can do is make sure the caller pays once rather than repeatedly.
+   * The header names the URL where the same answer is free, on the response
+   * they already paid for. Set regardless of PRICING_MODE, because the gateway
+   * charges regardless of it.
+   */
+  app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
+    const free = req.routeOptions?.url;
+    if (!free || isGated(free)) return;
+    if (priceFor(free) !== 0) return;
+    if (!readGatewayRequest(req.headers as Record<string, unknown>).trusted) return;
+    reply.header('x-oracle-free-at-origin', resourceUrl(free));
+  });
+
   app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
     if (pricingMode !== 'paid') return;
     const route = req.routeOptions?.url;
