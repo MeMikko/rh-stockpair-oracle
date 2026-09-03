@@ -71,11 +71,16 @@ const PROTOCOL_SPLIT_MIN_SHARE = 0.1;
  * a long run inside a couple of minutes, and the watcher's own sampling can
  * stall and leave a short run spanning hours. Requiring both closes each hole.
  *
- * Three hours is an order of magnitude past the longest flap observed so far
- * (about ten minutes, 2026-09-02). It replaces a majority-of-the-window test,
- * which was sound but slow: at full retention a genuine end needed roughly a
- * day of charging before the majority tipped, and a run says the same thing in
- * a form that a flap cannot fake.
+ * Three hours is roughly seven times the longest burst measured so far: 12
+ * bursts over 16 hours on 2026-09-03, the longest running 25 minutes, at a 24%
+ * duty cycle. The first burst observed was ten minutes and that number was
+ * briefly hardcoded here; it was the smallest of the set, not the bound. Watch
+ * the margin -- the last two bursts of that day were two to five times every
+ * one before them, and if the trend holds this threshold needs revisiting.
+ *
+ * It replaces a majority-of-the-window test, which was sound but slow: at full
+ * retention a genuine end needed roughly a day of charging before the majority
+ * tipped, and a run says the same thing in a form that a flap cannot fake.
  */
 const GAS_SUBSIDY_MIN_RUN_SAMPLES = 12;
 const GAS_SUBSIDY_MIN_RUN_SECONDS = 3 * 60 * 60;

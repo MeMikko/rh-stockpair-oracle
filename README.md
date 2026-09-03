@@ -568,8 +568,30 @@ The agent's subsidy signal fires on that run — at least 12 consecutive charged
 samples spanning at least 3 hours — rather than on a majority of the window.
 The majority test was sound but slow: at full retention (500 samples) a genuine
 end needed roughly a day of continuous charging before the majority tipped,
-whereas a three-hour unbroken run is an order of magnitude past the longest
-flap observed so far and is a shape no flap produces.
+whereas a three-hour unbroken run is a shape no flap produces.
+
+**The flap is a burst pattern, and it was mis-sized.** "About ten minutes" was
+written into both the `/gas` note and this README off the first burst ever
+observed. Walking the retained samples on 2026-09-03 showed twelve bursts in
+16.6 hours at a 24% duty cycle (29 of 120 samples), the longest running **25
+minutes** — the ten-minute figure was the smallest of the set, not the bound:
+
+```
+23:08 10min   23:45 5min   01:15 5min   02:00 <5min
+03:01  5min   03:36 5min   04:01 5min   04:16 <5min
+04:37  5min   04:52 5min   06:02 25min  06:47 20min (ongoing)
+```
+
+Those durations are **lower bounds, not measurements**: sampling is every five
+minutes, so a burst seen in two consecutive samples ran at least five minutes
+and at most fifteen, and one seen in a single sample ran under ten. Sizing a
+threshold off them is sound only in the conservative direction.
+
+Two things this leaves open. The last two bursts are two to five times every
+one before them, so the 7× margin between 25 minutes and the 3-hour threshold
+is not guaranteed to hold. And nothing here explains *why* the chain charges in
+bursts at all — the reading is real each time, not noise in our sampling, and
+the pattern is recorded rather than explained.
 
 Gas estimation executes the call, so a swap estimate needs a `from` that
 actually holds and has approved the token; without one the response explains

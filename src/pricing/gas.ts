@@ -46,7 +46,7 @@ function subsidyNote(l1DataFreeNow: boolean, e: SubsidyEvidence): string {
   if (e.currentNonZeroRun === 0) {
     return `L1 calldata is zero at this block and has been unbroken since ${e.zeroSince === null ? 'the start of the window' : at(e.zeroSince)}, but ${e.nonZeroSamples} of ${e.samples} retained samples were non-zero. The reading flaps; treat the subsidy as uncertain, not ended.`;
   }
-  return `L1 calldata is being charged, unbroken across the last ${e.currentNonZeroRun} sample(s) spanning ${minutes(e.currentNonZeroRunSeconds)} minute(s) (${e.nonZeroSamples} of ${e.samples} retained samples non-zero). The longest flap observed so far ran about ten minutes; weigh the run against that before concluding the subsidy has ended.`;
+  return `L1 calldata is being charged, unbroken across the last ${e.currentNonZeroRun} sample(s) spanning ${minutes(e.currentNonZeroRunSeconds)} minute(s) (${e.nonZeroSamples} of ${e.samples} retained samples non-zero). Charging comes in bursts that revert: as of 2026-09-03 the longest measured ran 25 minutes, over 12 bursts in 16 hours. Weigh the run against that before concluding the subsidy has ended.`;
 }
 
 export async function readGas(): Promise<GasSnapshot> {
