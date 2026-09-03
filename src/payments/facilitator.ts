@@ -5,7 +5,7 @@ import { facilitatorConfigured, x402Config } from '../../config/x402.js';
  *
  * A facilitator does the two things a resource server should not have to do
  * itself: check that a signed payment authorization is valid and will settle,
- * and submit it. Its gas, not the caller's, which is what makes a $0.005 call
+ * and submit it. Its gas, not the caller's, which is what makes a $0.02 call
  * payable at all — the caller signs, nobody funds a wallet, and no
  * transaction is broadcast by this process.
  *

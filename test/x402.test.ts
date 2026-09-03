@@ -94,9 +94,9 @@ describe('402 body', () => {
   });
 
   it('tells a caller where and how much to pay without reading docs', () => {
-    // $0.01 at 6 decimals, on both schemes.
+    // $0.02 at 6 decimals, on both schemes -- one price for every priced route.
     for (const accept of body.accepts) {
-      expect(accept.maxAmountRequired).toBe('10000');
+      expect(accept.maxAmountRequired).toBe('20000');
       expect(accept.payTo).toMatch(/^0x[0-9a-fA-F]{40}$/);
     }
   });
@@ -108,8 +108,10 @@ describe('402 body', () => {
     expect(body.settlement.howToPay).toMatch(/no minimum/i);
   });
 
-  it('prices the cheaper routes lower', () => {
-    expect(payment402Body('/ask', DOMAIN).accepts[0]!.maxAmountRequired).toBe('5000');
+  /** One price, so a caller reading one route's 402 is right about all of them. */
+  it('prices every priced route the same', () => {
+    expect(payment402Body('/ask', DOMAIN).accepts[0]!.maxAmountRequired).toBe('20000');
+    expect(payment402Body('/gas', DOMAIN).accepts[0]!.maxAmountRequired).toBe('20000');
   });
 
   it('lists exact and the credit scheme, in that order', () => {

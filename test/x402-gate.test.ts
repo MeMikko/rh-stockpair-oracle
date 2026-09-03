@@ -89,7 +89,7 @@ describe('an unpaid call', () => {
     expect(res.statusCode).toBe(402);
     const body = res.json();
     expect(body.accepts[0].scheme).toBe('exact');
-    expect(body.accepts[0].maxAmountRequired).toBe('10000');
+    expect(body.accepts[0].maxAmountRequired).toBe('20000');
     expect(body.accepts[0].resource).toBe('https://oracle.sb4s.xyz/quote');
   });
 
@@ -264,13 +264,13 @@ describe('prepaid credit', () => {
       headers: { 'x-payment': payer },
     });
     expect(res.statusCode).toBe(200);
-    expect(creditBalance(payer)).toBe(15_000n);
+    expect(creditBalance(payer)).toBe(5_000n);
   });
 
   it('reports the shortfall rather than a bare refusal', async () => {
     const payer = '0x1111111111111111111111111111111111111111';
     const res = await app.inject({ method: 'GET', url: '/quote', headers: { 'x-payment': payer } });
     expect(res.statusCode).toBe(402);
-    expect(res.json().shortfallUnits).toBe('10000');
+    expect(res.json().shortfallUnits).toBe('20000');
   });
 });

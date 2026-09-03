@@ -6,108 +6,257 @@ import { labelHook, DYNAMIC_FEE_FLAG } from '../../../config/addresses.js';
 import { feedFor } from '../../registry/feeds.js';
 import { readFeed, type OracleRead } from '../../pricing/chainlink.js';
 import { readPoolState, priceFromSqrtX96, activeLiquidityDepth } from '../../pricing/poolState.js';
-import { quoteExactIn } from '../../pricing/impact.js';
+import { readV3PoolState } from '../../pricing/poolStateV3.js';
+import { quoteExactIn, type ImpactResult } from '../../pricing/impact.js';
+import { quoteExactInV3 } from '../../pricing/impactV3.js';
 import { readMultiplier, type MultiplierState } from '../../pricing/multiplier.js';
 import { marketStatus } from '../../pricing/marketHours.js';
 import { computeDeviation } from '../../pricing/deviation.js';
 import { stockTokenMap } from '../../registry/stockTokens.js';
 
-interface PoolRecord {
+/**
+ * `/quote` speaks both protocols, because the chain does.
+ *
+ * v3 carries about a third of stock-paired volume here and four of the five
+ * largest stock-paired pools are v3. The indexer has covered both from the
+ * start; this endpoint used to answer `pool not indexed` for every v3 address,
+ * which made "covers v4 and v3" true of the index and false of the service.
+ *
+ * The two protocols differ in exactly two places — where the state lives, and
+ * how the quoter addresses a pool — so those are the only branches. Price,
+ * depth, Chainlink deviation, corporate actions and market hours are computed
+ * identically, which is what makes the two answers comparable.
+ */
+
+interface V4PoolRecord {
   pool_id: string; currency0: string; currency1: string; fee: number;
   tick_spacing: number; hooks: string; stock_side: number | null;
   stock_symbol: string | null; paired_token: string | null; quote_kind: string;
 }
 
+interface V3PoolRecord {
+  address: string; token0: string; token1: string; fee: number;
+  tick_spacing: number; stock_side: number | null;
+  stock_symbol: string | null; paired_token: string | null; quote_kind: string;
+}
+
+/** The pool-agnostic half of an answer: what the stock side implies in USD. */
+async function stockContext(pool: {
+  quoteKind: string;
+  stockSymbol: string | null;
+  pairedToken: string | null;
+  stockSide: number | null;
+  currency0: string;
+  currency1: string;
+  /** currency1 per currency0, from the pool's own sqrt price. */
+  spot: number;
+}): Promise<{
+  oracle: OracleRead | null;
+  multiplier: MultiplierState | null;
+  impliedUsd: number | null;
+  deviation: Awaited<ReturnType<typeof computeDeviation>>;
+}> {
+  let oracle: OracleRead | null = null;
+  let multiplier: MultiplierState | null = null;
+  let impliedUsd: number | null = null;
+  let deviation: Awaited<ReturnType<typeof computeDeviation>> = {
+    deviation: null, reason: 'pool_not_stock_paired',
+    poolImpliedStockUsd: null, referenceUsd: null,
+  };
+
+  if (pool.quoteKind !== 'stock' || !pool.stockSymbol || !pool.pairedToken) {
+    return { oracle, multiplier, impliedUsd, deviation };
+  }
+
+  const stockAddr = pool.stockSide === 0 ? pool.currency0 : pool.currency1;
+  multiplier = await readMultiplier(stockAddr as Address);
+
+  const feed = feedFor(pool.stockSymbol);
+  // 159 of 194 stock tokens have no Chainlink feed. Report that explicitly
+  // rather than omitting the field: a consumer must be able to tell
+  // "no deviation" apart from "deviation unknowable".
+  if (feed) oracle = await readFeed(feed);
+
+  // spot is currency1 per currency0; normalise to stock tokens per paired token.
+  const stockPerPaired = pool.stockSide === 0 ? 1 / pool.spot : pool.spot;
+  if (oracle) impliedUsd = stockPerPaired * oracle.priceUsd;
+
+  deviation = await computeDeviation(
+    pool.stockSymbol, pool.pairedToken, stockPerPaired, oracle, stockTokenMap(),
+  );
+
+  return { oracle, multiplier, impliedUsd, deviation };
+}
+
+/**
+ * A size is checked before anything is read from the chain.
+ *
+ * `BigInt(Math.round(NaN))` throws, which used to surface as
+ * `quoter_failed: Cannot convert NaN to a BigInt` — a chain error for a typo,
+ * after three RPC round trips had already been spent on it.
+ */
+function sizeOf(raw: string | undefined): { ok: true; size: number | null } | { ok: false } {
+  if (raw === undefined || raw === '') return { ok: true, size: null };
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return { ok: false };
+  return { ok: true, size: n };
+}
+
+const impactBody = (r: ImpactResult) => ({
+  amountIn: r.amountIn.toString(),
+  amountOut: r.amountOut.toString(),
+  executionPrice: r.executionPrice,
+  priceImpact: r.priceImpact,
+  gasEstimate: r.gasEstimate.toString(),
+  source: r.source,
+  ...(r.ticksCrossed === undefined ? {} : { ticksCrossed: r.ticksCrossed }),
+});
+
 export function registerQuote(app: FastifyInstance): void {
   app.get('/quote', async (req, reply) => {
     const q = req.query as { pool?: string; size?: string };
-    if (!q.pool) return reply.code(400).send({ error: 'pool query param required (v4 poolId)' });
-
-    const pool = getDb()
-      .prepare('SELECT * FROM pools WHERE pool_id = ?')
-      .get(q.pool.toLowerCase()) as PoolRecord | undefined;
-    if (!pool) return reply.code(404).send({ error: 'pool not indexed', poolId: q.pool });
-
-    const [meta0, meta1] = await Promise.all([
-      tokenMeta(pool.currency0), tokenMeta(pool.currency1),
-    ]);
-    const dec0 = meta0.decimals, dec1 = meta1.decimals;
-    const state = await readPoolState(pool.pool_id as Hex, pool.fee);
-    const spot = priceFromSqrtX96(state.sqrtPriceX96, dec0, dec1);
-    const depth = activeLiquidityDepth(state.liquidity, state.sqrtPriceX96, dec0, dec1);
-
-    let oracle: OracleRead | null = null;
-    let multiplier: MultiplierState | null = null;
-    let impliedUsd: number | null = null;
-    let deviation: Awaited<ReturnType<typeof computeDeviation>> = {
-      deviation: null, reason: 'pool_not_stock_paired',
-      poolImpliedStockUsd: null, referenceUsd: null,
-    };
-
-    if (pool.quote_kind === 'stock' && pool.stock_symbol && pool.paired_token) {
-      const stockAddr = pool.stock_side === 0 ? pool.currency0 : pool.currency1;
-      multiplier = await readMultiplier(stockAddr as Address);
-
-      const feed = feedFor(pool.stock_symbol);
-      // 159 of 194 stock tokens have no Chainlink feed. Report that explicitly
-      // rather than omitting the field: a consumer must be able to tell
-      // "no deviation" apart from "deviation unknowable".
-      if (feed) oracle = await readFeed(feed);
-
-      // spot is currency1 per currency0; normalise to stock tokens per paired token.
-      const stockPerPaired = pool.stock_side === 0 ? 1 / spot : spot;
-      if (oracle) impliedUsd = stockPerPaired * oracle.priceUsd;
-
-      deviation = await computeDeviation(
-        pool.stock_symbol, pool.paired_token, stockPerPaired, oracle, stockTokenMap(),
-      );
+    if (!q.pool) {
+      return reply.code(400).send({
+        error: 'pool query param required: a v4 poolId (32 bytes) or a v3 pool address',
+        find: 'GET /pools?symbol=NVDA lists both, with their identifiers',
+      });
     }
+
+    const key = q.pool.toLowerCase();
+    const db = getDb();
+    const v4 = db.prepare('SELECT * FROM pools WHERE pool_id = ?').get(key) as
+      | V4PoolRecord
+      | undefined;
+    // Looked up by address only when the v4 lookup missed: the two key spaces
+    // cannot collide (32 bytes vs 20), so the order is about cost, not
+    // correctness.
+    const v3 = v4
+      ? undefined
+      : (db.prepare('SELECT * FROM pools_v3 WHERE address = ?').get(key) as V3PoolRecord | undefined);
+
+    if (!v4 && !v3) {
+      return reply.code(404).send({
+        error: 'pool not indexed',
+        poolId: q.pool,
+        note:
+          'Both protocols are indexed from their creation block, so an unknown identifier is ' +
+          'usually a pool on another chain, or a v4 poolId given where an address belongs. ' +
+          'GET /pools?symbol=… lists what is indexed for a stock.',
+      });
+    }
+
+    // Before any RPC: a bad size is the caller's typo, not a chain failure.
+    const size = sizeOf(q.size);
+    if (!size.ok) {
+      return reply.code(400).send({ error: 'size must be a positive number of whole tokens' });
+    }
+
+    const token0 = (v4?.currency0 ?? v3!.token0) as Address;
+    const token1 = (v4?.currency1 ?? v3!.token1) as Address;
+    const [meta0, meta1] = await Promise.all([tokenMeta(token0), tokenMeta(token1)]);
+    const dec0 = meta0.decimals;
+    const dec1 = meta1.decimals;
+
+    // The one branch that matters for state: v4 keeps it behind StateView,
+    // v3 in the pool contract itself. Kept as two typed values rather than a
+    // union, so the fields only one protocol has cannot be read off the other
+    // by accident.
+    const s4 = v4 ? await readPoolState(v4.pool_id as Hex, v4.fee) : null;
+    const s3 = v3 ? await readV3PoolState(v3.address as Address) : null;
+    const sqrtPriceX96 = s4?.sqrtPriceX96 ?? s3!.sqrtPriceX96;
+    const liquidity = s4?.liquidity ?? s3!.liquidity;
+    const tick = s4?.tick ?? s3!.tick;
+    const spot = priceFromSqrtX96(sqrtPriceX96, dec0, dec1);
+    const depth = activeLiquidityDepth(liquidity, sqrtPriceX96, dec0, dec1);
+
+    const record = v4
+      ? {
+          quoteKind: v4.quote_kind, stockSymbol: v4.stock_symbol,
+          pairedToken: v4.paired_token, stockSide: v4.stock_side,
+        }
+      : {
+          quoteKind: v3!.quote_kind, stockSymbol: v3!.stock_symbol,
+          pairedToken: v3!.paired_token, stockSide: v3!.stock_side,
+        };
+
+    const { oracle, multiplier, impliedUsd, deviation } = await stockContext({
+      ...record,
+      currency0: token0,
+      currency1: token1,
+      spot,
+    });
 
     let impact = null;
     let impactError: string | null = null;
-    if (q.size) {
-      const zeroForOne = pool.stock_side !== 0; // sell the paired token into the pool
+    if (size.size !== null) {
+      const zeroForOne = record.stockSide !== 0; // sell the paired token into the pool
       const decIn = zeroForOne ? dec0 : dec1;
       const decOut = zeroForOne ? dec1 : dec0;
+      const amountIn = BigInt(Math.round(size.size * 10 ** decIn));
       try {
-        const amountIn = BigInt(Math.round(Number(q.size) * 10 ** decIn));
-        const r = await quoteExactIn(
-          {
-            currency0: pool.currency0 as Address, currency1: pool.currency1 as Address,
-            fee: pool.fee, tickSpacing: pool.tick_spacing, hooks: pool.hooks as Address,
-          },
-          zeroForOne, amountIn, spot, decIn, decOut,
+        impact = impactBody(
+          v4
+            ? await quoteExactIn(
+                {
+                  currency0: token0, currency1: token1, fee: v4.fee,
+                  tickSpacing: v4.tick_spacing, hooks: v4.hooks as Address,
+                },
+                zeroForOne, amountIn, spot, decIn, decOut,
+              )
+            : await quoteExactInV3({
+                tokenIn: zeroForOne ? token0 : token1,
+                tokenOut: zeroForOne ? token1 : token0,
+                // The live fee, not the indexed one. They agree on v3, and
+                // reading it costs nothing beyond the call already made.
+                fee: s3!.fee,
+                amountIn, spotPrice: spot, zeroForOne,
+                decimalsIn: decIn, decimalsOut: decOut,
+              }),
         );
-        impact = {
-          amountIn: r.amountIn.toString(), amountOut: r.amountOut.toString(),
-          executionPrice: r.executionPrice, priceImpact: r.priceImpact,
-          gasEstimate: r.gasEstimate.toString(), source: r.source,
-        };
       } catch (err) {
         impactError = `quoter_failed: ${(err as Error).message.slice(0, 140)}`;
       }
     }
 
     return {
-      poolId: pool.pool_id,
+      // The identifier as given: a 32-byte poolId for v4, a pool address for
+      // v3. Kept under one name so a caller can round-trip whatever it holds.
+      poolId: v4?.pool_id ?? v3!.address,
+      protocol: v4 ? 'v4' : 'v3',
       chainId: 4663,
       pair: {
-        currency0: pool.currency0, currency1: pool.currency1,
+        currency0: token0, currency1: token1,
         decimals0: dec0, decimals1: dec1,
         decimalsSource0: meta0.source, decimalsSource1: meta1.source,
-        quoteKind: pool.quote_kind, stockSymbol: pool.stock_symbol,
-        pairedToken: pool.paired_token,
+        quoteKind: record.quoteKind, stockSymbol: record.stockSymbol,
+        pairedToken: record.pairedToken,
       },
-      pool: {
-        fee: pool.fee,
-        feeIsDynamic: pool.fee === DYNAMIC_FEE_FLAG,
-        liveLpFee: state.lpFee,
-        tickSpacing: pool.tick_spacing,
-        tick: state.tick,
-        hooks: pool.hooks,
-        hookLabel: labelHook(pool.hooks),
-        liquidity: state.liquidity.toString(),
-      },
+      pool: v4
+        ? {
+            fee: v4.fee,
+            feeIsDynamic: v4.fee === DYNAMIC_FEE_FLAG,
+            liveLpFee: s4!.lpFee,
+            tickSpacing: v4.tick_spacing,
+            tick,
+            hooks: v4.hooks,
+            hookLabel: labelHook(v4.hooks),
+            liquidity: liquidity.toString(),
+          }
+        : {
+            address: v3!.address,
+            fee: s3!.fee,
+            // v3 has no dynamic fee and no hook. Both are reported as false
+            // and null rather than omitted, so one consumer can read either
+            // protocol's answer without branching.
+            feeIsDynamic: false,
+            liveLpFee: s3!.fee,
+            tickSpacing: v3!.tick_spacing,
+            tick,
+            hooks: null,
+            hookLabel: null,
+            liquidity: liquidity.toString(),
+            unlocked: s3!.unlocked,
+          },
       price: {
         spotCurrency1PerCurrency0: spot,
         impliedUsdOfPairedToken: impliedUsd,

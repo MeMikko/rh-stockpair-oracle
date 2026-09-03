@@ -31,7 +31,7 @@ const PAYLOAD = {
 const REQUIREMENTS = {
   scheme: 'exact',
   network: 'base',
-  maxAmountRequired: '10000',
+  maxAmountRequired: '20000',
   resource: 'https://oracle.sb4s.xyz/quote',
   description: 'One call to /quote',
   mimeType: 'application/json',

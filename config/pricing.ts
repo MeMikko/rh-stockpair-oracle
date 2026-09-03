@@ -7,9 +7,21 @@
  * every response, and turning billing on later is a mode change rather than a
  * redesign.
  *
- * Pricing follows the suggested x402 band for this ecosystem ($0.005-$0.02),
- * at the bottom of it: adoption is the goal, so the price exists to cover the
- * upstream RPC calls a request causes rather than to earn margin.
+ * Pricing follows the suggested x402 band for this ecosystem ($0.005-$0.02).
+ * It used to sit at the bottom of it, in two tiers that tracked what a call
+ * costs to serve. It is now ONE price, $0.02, for every priced route.
+ *
+ * The reason is the payment surface, not the cost of serving. Bankr's hosted
+ * gateway prices an endpoint, not a route: a caller paying through
+ * x402.bankr.bot/<wallet>/vates pays one figure whatever it then calls. Two
+ * tiers could not be expressed there, and the alternatives were both worse
+ * than a flat price -- charge everything at the cheap tier and sell a quoter
+ * simulation below what it costs, or publish a split the gateway does not
+ * honour and have callers discover it by being charged something else.
+ *
+ * So: one price, published identically on every surface -- the response
+ * headers, the 402 body, the service descriptor, the gateway dashboard. A
+ * caller can read one number and be right everywhere.
  */
 
 export type PricingMode = 'launch' | 'paid';
@@ -23,35 +35,34 @@ export const pricingMode: PricingMode =
   process.env.PRICING_MODE === 'paid' ? 'paid' : 'launch';
 
 /**
- * Intended price per call, USD. The three tiers reflect real upstream cost:
- * an index read touches only local SQLite, a chain read costs an RPC round
- * trip, and a quoter simulation costs several.
- */
-/**
  * Priced routes. Anything absent from this map is unpriced *and* unmetered --
  * which is why /webhooks/farcaster is deliberately not here. It is inbound
  * from Neynar rather than a call anyone makes, and counting it would put the
  * webhook in the usage figures the pricing decision is meant to read.
  */
 export const ROUTE_PRICES: Record<string, number> = {
-  // Index reads. Local, cheap to serve.
+  // Free, and staying free: a health check the proxy polls every 30 seconds,
+  // and the coverage split that says which of these prices can even produce a
+  // Chainlink deviation.
   '/health': 0,
   '/coverage': 0,
-  '/corporate-actions': 0.005,
-  '/ask': 0.005,
-  '/pools': 0.005,
-  '/volume': 0.005,
 
-  // Chain read: one Chainlink call per request.
-  '/price': 0.01,
-
-  // Chain reads. Each costs upstream RPC.
-  '/gas': 0.01,
-
-  // Quoter simulations. The most expensive thing here to serve.
-  '/quote': 0.01,
-  '/prepare-swap': 0.01,
+  // Everything else, at one price. $0.02 is the top of the band rather than
+  // the bottom, which is the honest consequence of a single figure: the
+  // expensive routes set it, because the cheap ones cannot subsidise them
+  // without being sold below cost.
+  '/corporate-actions': 0.02,
+  '/ask': 0.02,
+  '/pools': 0.02,
+  '/volume': 0.02,
+  '/price': 0.02,
+  '/gas': 0.02,
+  '/quote': 0.02,
+  '/prepare-swap': 0.02,
 };
+
+/** The one price every priced route carries. Exported so nothing hardcodes it. */
+export const FLAT_PRICE_USD = 0.02;
 
 /** Price for a route, or null when the route is not priced. */
 export function priceFor(route: string): number | null {

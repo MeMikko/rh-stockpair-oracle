@@ -471,7 +471,7 @@ ${ROUTES.map(
 <p>This is <strong>not a free service</strong>, and it is not advertised as one. It is in
 <strong>${esc(pricingMode)} mode</strong>: every route is served without charge and no key is
 required, while each response publishes what the call will cost once billing is enabled.</p>
-<pre><code>x-oracle-price-usd: 0.01     what this route will cost
+<pre><code>x-oracle-price-usd: 0.02     what this route will cost
 x-oracle-charged-usd: 0      what it cost you today
 x-oracle-pricing: ${esc(pricingMode)}     the current mode</code></pre>
 

@@ -44,11 +44,16 @@ export function serviceDescriptor(): Record<string, unknown> {
       'GET /health': 'index freshness: pool counts, cursors with lag in seconds',
       'GET /coverage': 'which of the 194 stock tokens have a Chainlink feed',
       'GET /price?symbol=': "a stock's own USD price from Chainlink; 404 with a reason where no feed exists",
-      'GET /pools?symbol=': 'pool counts for a stock, split by protocol',
+      'GET /pools?symbol=':
+        'pool counts for a stock split by protocol, plus the top 25 pool identifiers to ' +
+        'quote, ordered by measured 24h swaps',
       'GET /volume': '24h stock-paired volume and the window it was measured over',
       'GET /corporate-actions?withinDays=': 'upcoming splits and dividends joined to affected pools',
-      'GET /quote?pool=&size=': 'implied USD, depth, price impact, Chainlink deviation, market hours',
-      'POST /prepare-swap': 'unsigned UniversalRouter calldata with a min-out from the quoter',
+      'GET /quote?pool=&size=':
+        'implied USD, depth, price impact, Chainlink deviation, market hours. Takes a v4 ' +
+        'poolId or a v3 pool address; `protocol` in the response says which',
+      'POST /prepare-swap':
+        'unsigned UniversalRouter calldata with a min-out from the quoter. v4 pools only',
       'POST /ask': 'free-text question; returns facts and a reproduce call',
       'GET /x402/supported': 'which payment schemes and network this deployment settles',
       'POST /x402/topup': 'turn a USDC transfer into prepaid credit: {"txHash": "0x…"}',
@@ -68,7 +73,8 @@ export function serviceDescriptor(): Record<string, unknown> {
         'Chainlink feed, so a deviation is unknowable rather than absent. Read deviationReason.',
       depthVsImpact:
         'depth is an active-tick estimate and can mislead. impact comes from an on-chain ' +
-        'quoter simulation. Size a trade on impact.',
+        'quoter simulation. Size a trade on impact. `impact.source` names the quoter that ' +
+        'produced it: `quoter` for v4, `quoter-v3` for v3.',
       volumeFreshness:
         'Volume is a rolling 24h measurement refreshed every 6h, not live. GET /volume ' +
         'reports measuredSecondsAgo; use it rather than deriving age from a block delta.',
@@ -199,6 +205,11 @@ export function serviceDescriptor(): Record<string, unknown> {
     },
 
     limits: {
+      v3Calldata:
+        'POST /prepare-swap is v4 only. A v3 pool is indexed and quotable but answers 501 ' +
+        'there: v3 routes through SwapRouter02 with a plain ERC-20 approval rather than the ' +
+        'UniversalRouter with Permit2, so the calldata is a different shape and nothing here ' +
+        'will emit a half-correct version of it.',
       multiHopSwaps:
         "not supported. RH's UniversalRouter ExactInputParams carries a field upstream " +
         'v4-periphery does not have; it was empty in every live sample decoded, so its type ' +

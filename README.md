@@ -293,12 +293,42 @@ queued as a draft and requires the same human approval and the same `--live`
 as a broadcast. The listener only ever writes drafts. A mention it cannot
 answer is skipped rather than answered with a shrug.
 
+## Both protocols are quotable
+
+`GET /quote` takes a v4 poolId **or** a v3 pool address, and the response says
+which in `protocol`. That matters because v3 carries about a third of
+stock-paired volume here and four of the five largest stock-paired pools are
+v3: an endpoint that spoke only v4 was indexing the truth and publishing a
+subset of it.
+
+The two protocols differ in exactly two places, and those are the only
+branches in the handler — v4 keeps pool state behind StateView while v3 keeps
+it in the pool contract, and the v4 quoter takes a pool key while v3's takes
+(tokenIn, tokenOut, fee). Price, depth, Chainlink deviation, corporate actions
+and market hours are computed identically, which is what makes the two answers
+comparable. `impact.source` names which quoter produced a figure (`quoter` for
+v4, `quoter-v3` for v3), and a v3 answer adds `ticksCrossed` — a high count on
+a small size is the clearest signal that a pool's liquidity is fragmented.
+
+`GET /pools?symbol=NVDA` now returns identifiers, not just counts, ordered by
+measured 24h swap count. A count is not actionable: `/quote` needs an
+identifier, and until this listed some, the only way to get one was to index
+the chain yourself. NVDA has thousands of pools and all but a handful are
+empty, so the list is capped at 25 and says so.
+
+**`/prepare-swap` stays v4 only**, and a v3 pool answers `501` there rather
+than `404` — it is a pool this service will happily quote, and the honest
+reason is that v3 routes through SwapRouter02 with a plain ERC-20 approval
+instead of the UniversalRouter with Permit2. That is a different calldata
+shape, not a different address, and half-correct calldata is worse than none.
+
 ## Status
 
 - [x] Phase 1 — indexer + `/quote` + `/coverage`
 - [x] Phase 2 — `/prepare-swap` + `/gas`
 - [x] Phase 3 — corporate-action calendar + public agent with approval queue
 - [x] Genesis backfill, v3 indexing, volume measurement
+- [x] v3 pools quotable: `/quote` takes a v3 address, `/pools` lists identifiers
 - [x] `POST /ask` + Farcaster reply queue
 - [ ] Reconcile the volume gap against Bankr's figure
 - [ ] Cross-check discovery against Blockscout (blocked: free tier allows ~10
@@ -322,22 +352,29 @@ answer is skipped rather than answered with a shrug.
 while each response publishes what the call will cost once billing is enabled.
 
 ```
-x-oracle-price-usd: 0.01     what this route will cost
+x-oracle-price-usd: 0.02     what this route will cost
 x-oracle-charged-usd: 0      what it cost the caller today
 x-oracle-pricing: launch     the current mode
 ```
 
 Publishing the price from day one is the point. "Free" would be a promise that
 has to be broken later; a header a caller can read is a plan they can build
-against. `config/pricing.ts` holds the list, in three tiers that follow real
-upstream cost — index reads are local, chain reads cost an RPC round trip, and
-quoter simulations cost several:
+against. `config/pricing.ts` holds the list, and it is now **one price**:
 
 | Route | Price |
 |---|---|
 | `/health`, `/coverage` | free |
-| `/corporate-actions`, `/ask` | $0.005 |
-| `/gas`, `/quote`, `/prepare-swap` | $0.01 |
+| everything else priced | $0.02 |
+
+It used to be two tiers that tracked what a call costs to serve. The payment
+surface is what changed that: Bankr's gateway prices an *endpoint*, not a
+route, so a caller paying through it pays one figure whatever it calls. Two
+tiers could not be expressed there, and both alternatives were worse than a
+flat price — charge everything at the cheap tier and sell a quoter simulation
+below cost, or publish a split the gateway does not honour and let callers
+discover it by being charged something else. $0.02 is therefore the top of the
+band rather than the bottom: with one figure, the expensive routes set it,
+because the cheap ones cannot subsidise them without being sold below cost.
 
 Payment itself is deliberately not wired up yet — see the status list. What is
 wired up is the accounting: `usage` counts calls per day, route and caller, so

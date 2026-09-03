@@ -6,9 +6,10 @@ comes first — success = other agents call it, Bankr/Long people notice it, and
 the public feed says things nobody else can say.
 
 **It is not a free service and must never be advertised as one.** Prices are
-published from launch even though nothing is charged yet: $0.005 for index
-reads, $0.01 for anything costing an upstream RPC round trip, `/health` and
-`/coverage` free. Every priced response carries `x-oracle-price-usd`,
+published from launch even though nothing is charged yet: **$0.02 for every
+priced route**, `/health` and `/coverage` free. One price rather than tiers
+because Bankr's gateway prices an endpoint, not a route -- a split it does not
+honour would be a published price callers are not charged. Every priced response carries `x-oracle-price-usd`,
 `x-oracle-charged-usd` and `x-oracle-pricing`. "Free forever" is a promise that
 would have to be broken, so it is never made. Prices cover upstream cost rather
 than earn margin; see `config/pricing.ts`.
@@ -26,7 +27,9 @@ than earn margin; see `config/pricing.ts`.
      is-underlying-market-open flag, next corporate action on the pricing
      asset (split, dividend, ticker change).
    - `POST /prepare-swap` – ready-to-sign calldata, router address,
-     min-out with slippage. Never sends transactions. Single-hop only.
+     min-out with slippage. Never sends transactions. Single-hop only, and
+     v4 only: a v3 pool answers 501 (SwapRouter02 + approval is a different
+     calldata shape, and half-correct calldata is worse than none).
    - `GET /gas` – gas estimate for chain 4663, split into L2 and L1-data
      components. Nothing else covers RH gas today.
    - `GET /corporate-actions` – the published calendar joined to the indexed
