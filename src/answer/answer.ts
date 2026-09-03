@@ -8,6 +8,7 @@ import { readFeed } from '../pricing/chainlink.js';
 import { marketStatus } from '../pricing/marketHours.js';
 import { verifyDraft } from '../agent/verify.js';
 import { REPRODUCE } from '../api/routes/data.js';
+import { bestSampledPool, driftBySession, historyDepth, snapshotsForPool } from '../history/series.js';
 import { aboutFacts, conversationalAnswer, conversationalConfig } from './conversational.js';
 import type { Tier } from '../entitlements/index.js';
 
@@ -42,9 +43,14 @@ export interface Answer {
   conversational?: boolean;
 }
 
+/** Two decimals, because that is the precision the text quotes. A number the
+ * text renders differently from the fact it came from fails the verifier. */
+const round2 = (n: number) => Number(n.toFixed(2));
+
 const NO_IDEA =
   'I only answer from indexed Robinhood Chain data: stock prices from Chainlink, pool ' +
-  'counts, upcoming corporate actions, feed coverage, gas, and the v3/v4 volume split. ' +
+  'counts, upcoming corporate actions, feed coverage, gas, the v3/v4 volume split, and ' +
+  'what I have recorded over time — including how far pools drift while the market is shut. ' +
   'Name a ticker or a pool id.';
 
 function poolCounts(symbol: string): { v4: number; v3: number; total: number } {
@@ -197,6 +203,119 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
           `${c.uncovered.length} of ${c.total} Robinhood Chain stock tokens have no Chainlink ` +
           `feed (${Number((c.coverageRatio * 100).toFixed(1))}% covered).`,
         reproduce: 'GET /coverage',
+      };
+    }
+
+    /**
+     * What a pool did, rather than what it is doing.
+     *
+     * The only answer here that can be wrong by being *empty* rather than by
+     * being incorrect, and the difference matters: "I have not been recording
+     * long enough" is a true statement about this deployment, where "I do not
+     * know" would imply the question is unanswerable. So a thin series says
+     * how thin it is instead of pretending, and never extrapolates from two
+     * points.
+     */
+    case 'history': {
+      if (!intent.symbol) break;
+      const hours = 24;
+      const depth = historyDepth();
+      const best = bestSampledPool(intent.symbol);
+      if (!best) {
+        return {
+          ...base,
+          facts: { symbol: intent.symbol, samples: 0, snapshots: depth.snapshots },
+          text:
+            `I have no recorded history for ${intent.symbol} yet. Sampling covers the busiest ` +
+            'stock-paired pools first, so a quiet pool takes longer to appear.',
+          reproduce: REPRODUCE.history(intent.symbol, hours),
+          answered: false,
+        };
+      }
+      const series = snapshotsForPool(best.poolKey, Date.now() - hours * 3_600_000);
+      const priced = series.filter((r) => r.poolStockUsd !== null);
+      if (priced.length < 2) {
+        return {
+          ...base,
+          facts: { symbol: intent.symbol, samples: priced.length, hours },
+          text:
+            `I have ${priced.length} priced samples for ${intent.symbol} in the last ${hours} ` +
+            'hours — not enough to say what it did. Ask again once more has been recorded.',
+          reproduce: REPRODUCE.history(intent.symbol, hours),
+          answered: false,
+        };
+      }
+      const first = priced[0]!.poolStockUsd!;
+      const last = priced[priced.length - 1]!.poolStockUsd!;
+      const values = priced.map((r) => r.poolStockUsd!);
+      const low = round2(Math.min(...values));
+      const high = round2(Math.max(...values));
+      const changePercent = round2(((last - first) / first) * 100);
+      return {
+        ...base,
+        facts: {
+          symbol: intent.symbol,
+          samples: priced.length,
+          hours,
+          first: round2(first),
+          last: round2(last),
+          low,
+          high,
+          changePercent,
+        },
+        text:
+          `Over the last ${hours} hours the busiest ${intent.symbol} pool implied ` +
+          `${round2(first)} to ${round2(last)} USD, ranging ${low} to ${high} ` +
+          `(${changePercent}% across ${priced.length} recorded samples).`,
+        reproduce: REPRODUCE.history(intent.symbol, hours),
+      };
+    }
+
+    /**
+     * The question this whole service exists to be able to answer.
+     *
+     * Stock tokens trade 24/5 on-chain while the equity market keeps hours, so
+     * whether a pool drifts while the market is shut is measurable — but only
+     * against a record that pairs each price with the session it was taken in.
+     * Nothing else on this chain kept one, which is also why the honest answer
+     * on a young deployment is that the record is still short.
+     */
+    case 'market_drift': {
+      if (!intent.symbol) break;
+      const hours = 24 * 7;
+      const stats = driftBySession(intent.symbol, Date.now() - hours * 3_600_000);
+      const open = stats.find((s) => s.session === 'regular');
+      const shut = stats.find((s) => s.session === 'closed');
+      if (!open?.meanAbsDeviation || !shut?.meanAbsDeviation) {
+        const have = stats.reduce((n, s) => n + s.samples, 0);
+        return {
+          ...base,
+          facts: { symbol: intent.symbol, samples: have, hours },
+          text:
+            `I cannot compare open and closed sessions for ${intent.symbol} yet: ${have} ` +
+            'recorded samples, and both sides of the comparison need measured deviations. ' +
+            'A stock with no Chainlink feed never gets them at all.',
+          reproduce: REPRODUCE.history(intent.symbol, hours),
+          answered: false,
+        };
+      }
+      const openPct = round2(open.meanAbsDeviation * 100);
+      const shutPct = round2(shut.meanAbsDeviation * 100);
+      return {
+        ...base,
+        facts: {
+          symbol: intent.symbol,
+          hours,
+          openMeanPercent: openPct,
+          closedMeanPercent: shutPct,
+          openSamples: open.samples,
+          closedSamples: shut.samples,
+        },
+        text:
+          `Over ${hours} hours, ${intent.symbol} pools sat ${openPct}% from the Chainlink ` +
+          `price on average while the market was open and ${shutPct}% while it was closed ` +
+          `(${open.samples} and ${shut.samples} recorded samples).`,
+        reproduce: REPRODUCE.history(intent.symbol, hours),
       };
     }
 

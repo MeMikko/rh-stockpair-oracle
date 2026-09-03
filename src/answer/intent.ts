@@ -23,6 +23,8 @@ export type IntentKind =
   | 'gas'
   | 'protocol_split'
   | 'quote'
+  | 'history'
+  | 'market_drift'
   | 'unknown';
 
 export interface Intent {
@@ -50,6 +52,34 @@ export interface Intent {
  * dividend is about the dividend whatever else it mentions.
  */
 const RULES: Array<{ kind: IntentKind; any: RegExp[]; requires?: (i: Partial<Intent>) => boolean }> = [
+  // First, and deliberately so. A question about what a pool does while the
+  // market is shut names both a market word and a price word, so any later
+  // rule would swallow it -- and it is the one question this service can
+  // answer from a record nobody else kept. Losing it to the price rule would
+  // mean answering "NVDA is $229" to "how far does NVDA drift overnight",
+  // which is a confident answer to a different question.
+  {
+    kind: 'market_drift',
+    any: [
+      /\b(overnight|after hours|after-hours|premarket|pre-market)\b/i,
+      /\bmarket (is )?(closed|shut|open)\b/i,
+      /\b(while|when|whilst)\b.{0,20}\b(closed|shut|open)\b/i,
+      /\bdrifts?\b/i,
+      /\bweekend\b/i,
+    ],
+  },
+  // Then history, before price: "what was NVDA" and "what is NVDA" differ by
+  // one word and by which table holds the answer.
+  {
+    kind: 'history',
+    any: [
+      /\b(history|historical|over time|time series|timeseries)\b/i,
+      /\b(yesterday|last (week|night|hour|day)|past (week|day|hours?|days?))\b/i,
+      /\bwhat (was|were|did)\b/i,
+      /\b(has|have) .{0,30}\b(been|changed|moved)\b/i,
+      /\btrend(ed|ing)?\b/i,
+    ],
+  },
   {
     kind: 'corporate_action',
     any: [

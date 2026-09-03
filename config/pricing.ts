@@ -59,6 +59,7 @@ export const ROUTE_PRICES: Record<string, number> = {
   '/gas': 0.02,
   '/quote': 0.02,
   '/prepare-swap': 0.02,
+  '/history': 0.02,
 };
 
 /** The one price every priced route carries. Exported so nothing hardcodes it. */

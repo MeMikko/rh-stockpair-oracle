@@ -186,6 +186,32 @@ export async function measureV3Volume(
   return acc;
 }
 
+/**
+ * The stock-paired pool keys, as one set.
+ *
+ * The v4 scan is chain-wide by necessity — one address filter covers the whole
+ * protocol — so the accumulator carries every pool on the chain that traded.
+ * Current volume is stored for all of them because `/pools` reads it, but the
+ * permanent record is narrowed to the subject this service actually answers
+ * about. Keeping forever what is never asked about is not caution, it is
+ * hoarding.
+ */
+function stockPairedKeys(): Set<string> {
+  const db = getDb();
+  const keys = new Set<string>();
+  for (const r of db
+    .prepare('SELECT pool_id AS k FROM pools WHERE stock_symbol IS NOT NULL')
+    .all() as Array<{ k: string }>) {
+    keys.add(r.k.toLowerCase());
+  }
+  for (const r of db
+    .prepare('SELECT address AS k FROM pools_v3 WHERE stock_symbol IS NOT NULL')
+    .all() as Array<{ k: string }>) {
+    keys.add(r.k.toLowerCase());
+  }
+  return keys;
+}
+
 export function saveVolume(
   protocol: 'v4' | 'v3',
   win: VolumeWindow,
@@ -202,6 +228,17 @@ export function saveVolume(
        swaps = excluded.swaps, abs_amount0 = excluded.abs_amount0,
        abs_amount1 = excluded.abs_amount1, updated_at = excluded.updated_at`,
   );
+  // The same measurement, kept. `OR IGNORE` rather than an upsert: a window
+  // end identifies the sample, so re-running the same window is a repeat
+  // observation and must not overwrite what was recorded the first time.
+  const history = db.prepare(
+    `INSERT OR IGNORE INTO pool_volume_history
+       (pool_key, protocol, to_ts, from_block, to_block, from_ts, swaps,
+        abs_amount0, abs_amount1, measured_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const keep = stockPairedKeys();
+
   const now = Date.now();
   db.exec('BEGIN');
   try {
@@ -210,6 +247,12 @@ export function saveVolume(
         key, protocol, Number(win.fromBlock), Number(win.toBlock), win.fromTs, win.toTs,
         v.swaps, v.abs0.toString(), v.abs1.toString(), now,
       );
+      if (keep.has(key)) {
+        history.run(
+          key, protocol, win.toTs, Number(win.fromBlock), Number(win.toBlock), win.fromTs,
+          v.swaps, v.abs0.toString(), v.abs1.toString(), now,
+        );
+      }
     }
     db.exec('COMMIT');
   } catch (err) {

@@ -10,6 +10,8 @@ import { registerWebhook } from './routes/webhook.js';
 import { registerAuth } from './routes/auth.js';
 import { registerPro } from './routes/pro.js';
 import { registerData } from './routes/data.js';
+import { registerHistory } from './routes/history.js';
+import { historyDepth } from '../history/series.js';
 import { registerDiscovery } from './routes/discovery.js';
 import { registerX402 } from './x402.js';
 import { computeCoverage } from '../registry/coverage.js';
@@ -106,6 +108,20 @@ export function buildServer() {
         lastMeasuredCursors: lagged((s) => s.includes(':swaps:')),
         note: 'a rolling 24h measurement refreshed every 6h; see GET /volume for its window',
       },
+      // How much history exists, published free and on purpose. /history is
+      // priced, and a caller should be able to find out whether there is a
+      // series before paying for one -- on a fresh deployment there is not.
+      history: (() => {
+        const d = historyDepth();
+        return {
+          ...d,
+          since: d.since === null ? null : new Date(d.since).toISOString(),
+          note:
+            d.snapshots === 0
+              ? 'nothing recorded yet; this deployment cannot answer about the past'
+              : 'GET /history?symbol= for the series and the drift split by market session',
+        };
+      })(),
     };
   });
 
@@ -114,6 +130,7 @@ export function buildServer() {
   app.get('/coverage', async () => computeCoverage());
 
   registerQuote(app);
+  registerHistory(app);
   registerGas(app);
   registerPrepareSwap(app);
   registerCorporateActions(app);

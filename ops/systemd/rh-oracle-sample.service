@@ -1,0 +1,25 @@
+[Unit]
+Description=RH stock-pair oracle quote sampler (writes the history nobody can backfill)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=oracle
+Group=oracle
+WorkingDirectory=/opt/rh-oracle
+EnvironmentFile=/opt/rh-oracle/.env
+ExecStart=/usr/bin/node --env-file-if-exists=/opt/rh-oracle/.env --import tsx scripts/sample-quotes.ts
+# Twenty pools, read sequentially, is a couple of minutes at worst. A sweep
+# that has not finished before the next one starts is a sweep that is failing.
+TimeoutStartSec=10min
+
+MemoryMax=400M
+CPUWeight=20
+IOWeight=20
+Nice=10
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/rh-oracle/data

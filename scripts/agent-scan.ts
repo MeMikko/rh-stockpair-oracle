@@ -1,6 +1,6 @@
 import { tolerateClosedPipe } from '../src/util/stdout.js';
 import { fetchCorporateActions, saveCorporateActions } from '../src/corporate/calendar.js';
-import { detectCorporateActions, detectCoverage, detectGasSubsidy, detectIntroduction, detectProtocolSplit, saveSignals, type Signal } from '../src/agent/signals.js';
+import { detectClosedMarketDrift, detectCorporateActions, detectCoverage, detectGasSubsidy, detectIntroduction, detectProtocolSplit, saveSignals, type Signal } from '../src/agent/signals.js';
 import { draftPost } from '../src/agent/draft.js';
 import { enqueue } from '../src/agent/queue.js';
 
@@ -18,6 +18,8 @@ const signals: Signal[] = [
   ...detectCoverage(),
   ...(await detectProtocolSplit()),
   ...(await detectGasSubsidy()),
+  // Says nothing until the record is long enough to support it.
+  ...detectClosedMarketDrift(),
 ];
 const { inserted } = saveSignals(signals);
 console.log(`signals: ${signals.length} detected, ${inserted} new\n`);

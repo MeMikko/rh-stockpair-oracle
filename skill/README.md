@@ -59,6 +59,12 @@ advertised as a free service, and the mode has already changed once.
 - **Gas for chain 4663.** `GET /gas`, split into L2 and L1-data components,
   with the launch subsidy reported as an unbroken run of measured samples
   rather than assumed from a date.
+- **What it recorded, not just what it reads.** `GET /history?symbol=&hours=`
+  returns the price series for a stock's busiest pool and the drift against
+  Chainlink split by market session. Nobody can reconstruct this from the
+  chain — the public RPC has no archive — so it covers only what has been
+  sampled, and `GET /health` publishes the depth free so you can check before
+  paying. Gaps stay gaps; nothing is interpolated.
 - **Free text.** `POST /ask` returns a structured answer with the facts behind
   it and a call that reproduces it. No model in the data path.
 

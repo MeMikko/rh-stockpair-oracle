@@ -249,6 +249,36 @@ need none and never will. `x-oracle-pricing` tells you the mode you are in on
 every response — read it rather than assuming, including assuming this
 paragraph is still current.
 
+## What it recorded, not just what it reads
+
+`GET /history?symbol=NVDA&hours=168` returns the price series for that stock's
+busiest pool and — the part nothing else has — the drift against Chainlink
+**split by what the equity market was doing at the time**.
+
+This one endpoint cannot be reproduced by a competitor being cleverer. Robinhood
+Chain's public RPC has no archive and Alchemy's free tier caps `eth_getLogs` at
+ten blocks, so nobody can start today and produce last week. It exists only
+because something wrote it down as it happened.
+
+The honest consequence: it covers only what has been sampled, and on a young
+deployment that is very little. `GET /health` publishes the depth **free** —
+`history.snapshots`, `history.since`, `history.symbols` — so a caller finds out
+whether a series exists before paying for one. An empty answer says which is
+missing: the ticker, or the elapsed time.
+
+```
+GET /history?symbol=NVDA&hours=168
+  snapshots[]      price, pool-implied stock USD, Chainlink price, deviation,
+                   market session — one row, so the pairing is recorded rather
+                   than joined afterwards from two clocks
+  driftBySession[] mean and max |deviation| per session, with `unknowable`
+                   counted separately: 159 of 194 stock tokens have no feed,
+                   and a mean over "whatever had a number" would silently be a
+                   mean over a third of the subject
+```
+
+Gaps stay gaps. Nothing is interpolated or filled forward.
+
 ## Agent guidance
 
 - **Never treat `deviation: null` as zero.** Check `deviationReason`. Most
@@ -266,6 +296,9 @@ paragraph is still current.
 - **Do not hardcode a price.** Read `x-oracle-price-usd` and
   `x-oracle-charged-usd` per response. Launch mode already ended once; the
   headers are the only current answer.
+- **Treat a short series as short.** `/history` returns `samples`; two points
+  are not a trend, and `/ask` will say it has not recorded enough rather than
+  extrapolate. Ask again later rather than reading a slope into four readings.
 - **Do not compare these volume figures to another dashboard's.** Denominators
   differ; see the repository README for the measured breakdown and the
   unreconciled residual against Bankr's published number.

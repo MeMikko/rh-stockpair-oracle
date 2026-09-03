@@ -39,7 +39,7 @@ echo "==> installing systemd units"
 ssh "${TARGET}" "sudo cp ${REMOTE_DIR}/ops/systemd/*.service ${REMOTE_DIR}/ops/systemd/*.timer /etc/systemd/system/ && sudo systemctl daemon-reload"
 
 echo "==> restarting services"
-ssh "${TARGET}" "sudo systemctl restart rh-oracle-api rh-oracle-watch && sudo systemctl enable --now rh-oracle-sync.timer rh-oracle-agent.timer"
+ssh "${TARGET}" "sudo systemctl restart rh-oracle-api rh-oracle-watch && sudo systemctl enable --now rh-oracle-sync.timer rh-oracle-agent.timer rh-oracle-sample.timer"
 
 echo "==> health"
 ssh "${TARGET}" "sleep 3 && curl -fsS localhost:8080/health" && echo

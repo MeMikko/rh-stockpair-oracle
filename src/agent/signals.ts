@@ -4,6 +4,7 @@ import { upcomingActions } from '../corporate/calendar.js';
 import { computeCoverage } from '../registry/coverage.js';
 import { readGas } from '../pricing/gas.js';
 import { marketStatus } from '../pricing/marketHours.js';
+import { driftBySession } from '../history/series.js';
 import { agentIdentity } from '../../config/agent.js';
 
 export type Severity = 'info' | 'notable' | 'high';
@@ -327,6 +328,84 @@ export async function detectGasSubsidy(): Promise<Signal[]> {
     reproduce: 'GET /gas',
     detectedAt: Date.now(),
   }];
+}
+
+/**
+ * How far a stock's pools drift while its market is shut.
+ *
+ * The one thing this agent can say that nobody else on this chain can, and it
+ * became sayable only once the service started keeping a record: a live read
+ * shows the drift at this instant, and the claim worth publishing is about a
+ * period. The public RPC has no archive, so this cannot be reconstructed after
+ * the fact by anyone, including us.
+ *
+ * Four guards, because a post is a published claim:
+ *
+ *  - Both sessions must have measured deviations. A stock with no Chainlink
+ *    feed never produces one, and 159 of 194 have none.
+ *  - Both sides need `minSamples`. Two readings either side is an anecdote
+ *    with a percentage sign on it.
+ *  - The gap must clear `minDriftRatio`, so the agent does not announce noise
+ *    as a finding.
+ *  - The id keys on the rounded numbers, so the same standing observation is
+ *    posted once rather than daily until it moves.
+ */
+export interface DriftThresholds {
+  windowHours: number;
+  minSamples: number;
+  /** Closed-session drift must be at least this multiple of open-session drift. */
+  minDriftRatio: number;
+}
+
+export const DEFAULT_DRIFT: DriftThresholds = {
+  windowHours: 24 * 7,
+  minSamples: 12,
+  minDriftRatio: 1.5,
+};
+
+export function detectClosedMarketDrift(
+  t: DriftThresholds = DEFAULT_DRIFT,
+  now = Date.now(),
+): Signal[] {
+  const since = now - t.windowHours * 3_600_000;
+  const symbols = getDb()
+    .prepare(
+      `SELECT DISTINCT stock_symbol AS symbol FROM quote_snapshots
+       WHERE stock_symbol IS NOT NULL AND at >= ? AND deviation IS NOT NULL`,
+    )
+    .all(since) as Array<{ symbol: string }>;
+
+  const out: Signal[] = [];
+  for (const { symbol } of symbols) {
+    const stats = driftBySession(symbol, since);
+    const open = stats.find((x) => x.session === 'regular');
+    const shut = stats.find((x) => x.session === 'closed');
+    if (!open?.meanAbsDeviation || !shut?.meanAbsDeviation) continue;
+    if (open.samples < t.minSamples || shut.samples < t.minSamples) continue;
+    if (shut.meanAbsDeviation < open.meanAbsDeviation * t.minDriftRatio) continue;
+
+    const openPercent = round1(open.meanAbsDeviation * 100);
+    const closedPercent = round1(shut.meanAbsDeviation * 100);
+    out.push({
+      id: signalId('closed_market_drift', `${symbol}:${openPercent}:${closedPercent}`),
+      kind: 'closed_market_drift',
+      severity: closedPercent >= 2 ? 'high' : 'notable',
+      summary:
+        `${symbol} pools sit ${closedPercent}% from Chainlink while the market is closed, ` +
+        `against ${openPercent}% while it is open`,
+      facts: {
+        symbol,
+        windowHours: t.windowHours,
+        openMeanPercent: openPercent,
+        closedMeanPercent: closedPercent,
+        openSamples: open.samples,
+        closedSamples: shut.samples,
+      },
+      reproduce: `GET /history?symbol=${symbol}&hours=${t.windowHours}`,
+      detectedAt: now,
+    });
+  }
+  return out;
 }
 
 export function saveSignals(signals: Signal[]): { inserted: number } {
