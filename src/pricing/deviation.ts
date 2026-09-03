@@ -1,4 +1,4 @@
-import { feedFor } from '../registry/feeds.js';
+import { feedFor, referenceFeed } from '../registry/feeds.js';
 import { readFeed, type OracleRead } from './chainlink.js';
 import { TOKENS } from '../../config/addresses.js';
 
@@ -19,6 +19,7 @@ export interface DeviationResult {
  * Computable cases:
  *   stock/USDG          -- USDG treated as $1
  *   stock/stock         -- when both sides have feeds
+ *   stock/WETH          -- when an ETH/USD reference feed is published
  * Everything else       -- null, reason explains why.
  */
 export async function computeDeviation(
@@ -64,6 +65,22 @@ export async function computeDeviation(
     };
   }
 
-  if (paired === TOKENS.weth.toLowerCase()) return none('no_eth_usd_reference_configured');
+  // stock/WETH -- the same shape as stock/stock, with ETH's own feed standing
+  // in for the paired side. Kept last because it is the narrowest case, and
+  // gated on the feed actually existing: where the chain publishes no ETH/USD
+  // the answer is still null with a reason, not a number derived from nothing.
+  if (paired === TOKENS.weth.toLowerCase()) {
+    const ethFeed = referenceFeed('ETH');
+    if (!ethFeed) return none('no_eth_usd_reference_configured');
+    const ethOracle = await readFeed(ethFeed);
+    const poolStockUsd = ethOracle.priceUsd / stockPerPaired;
+    return {
+      deviation: (poolStockUsd - stockOracle.priceUsd) / stockOracle.priceUsd,
+      reason: null,
+      poolImpliedStockUsd: poolStockUsd,
+      referenceUsd: stockOracle.priceUsd,
+    };
+  }
+
   return none('paired_token_has_no_usd_reference');
 }

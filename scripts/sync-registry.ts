@@ -10,7 +10,18 @@ console.log(`stock tokens: ${tokens.length} (token_meta seeded)`);
 
 const feeds = await fetchFeeds();
 saveFeeds(feeds);
-console.log(`chainlink feeds: ${feeds.length}`);
+const stockFeeds = feeds.filter((f) => f.kind === 'stock');
+const refFeeds = feeds.filter((f) => f.kind === 'reference');
+console.log(`chainlink feeds: ${stockFeeds.length} equity`);
+// Said either way. Its absence is why stock/WETH pools report
+// no_eth_usd_reference_configured, and an operator should not have to read
+// deviation.ts to find that out.
+console.log(
+  refFeeds.length
+    ? `reference feeds: ${refFeeds.map((f) => `${f.symbol} (${f.name})`).join(', ')} ` +
+        '— stock/WETH pools are now measurable'
+    : 'reference feeds: none published for this chain — stock/WETH pools stay unmeasurable',
+);
 
 const cov = computeCoverage();
 console.log(`\ncoverage: ${cov.covered.length}/${cov.total} (${(cov.coverageRatio * 100).toFixed(1)}%)`);
