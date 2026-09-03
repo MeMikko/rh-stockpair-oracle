@@ -316,11 +316,37 @@ identifier, and until this listed some, the only way to get one was to index
 the chain yourself. NVDA has thousands of pools and all but a handful are
 empty, so the list is capped at 25 and says so.
 
-**`/prepare-swap` stays v4 only**, and a v3 pool answers `501` there rather
-than `404` — it is a pool this service will happily quote, and the honest
-reason is that v3 routes through SwapRouter02 with a plain ERC-20 approval
-instead of the UniversalRouter with Permit2. That is a different calldata
-shape, not a different address, and half-correct calldata is worse than none.
+**`/prepare-swap` builds for both**, in two genuinely different shapes. A v4
+pool gets UniversalRouter calldata and the Permit2 pair of approvals. A v3 pool
+gets a direct call to the v3 router and **one** plain ERC-20 approval, scoped
+to the swap rather than unlimited, because v3 pulls the input from the router
+itself.
+
+Three things on the v3 path are established rather than assumed, since each is
+a way to emit calldata that looks right and is not:
+
+- **Which router.** Uniswap shipped two. `SwapRouter` carries the deadline
+  inside the params struct; `SwapRouter02` dropped it and enforces one through
+  `multicall(deadline, [swap])`. One field's difference changes the struct,
+  which changes the selector — calldata for the wrong one is not slightly
+  wrong, it is a function the contract does not have. So the router is probed
+  with `factoryV2()`, which exists only on `SwapRouter02`, and the response
+  reports both the variant and whether it was read off the chain (`chain`) or
+  pinned by an operator (`config`). A probe that cannot reach the RPC answers
+  503 rather than guessing: not knowing which router is deployed is not the
+  same as knowing it is the old one.
+- **The fee.** Taken from the pool's own `fee()` rather than the indexed copy.
+  The router routes by `(tokenIn, tokenOut, fee)`, so a stale fee would send
+  the swap to a different pool than the one that was quoted.
+- **The recipient.** Required, not defaulted. v3 names it in the calldata
+  instead of falling back to the sender, and picking an address for someone
+  else's output is not this service's call.
+
+`swap.encoding` names exactly what was built
+(`SwapRouter02.multicall(deadline, [exactInputSingle])`), so a signer can check
+the calldata rather than trust it. Multi-hop stays unsupported on both
+protocols — a route the quoter never simulated has no min-out, and calldata
+without a min-out is the one thing this endpoint refuses to produce.
 
 ## Status
 
@@ -329,6 +355,7 @@ shape, not a different address, and half-correct calldata is worse than none.
 - [x] Phase 3 — corporate-action calendar + public agent with approval queue
 - [x] Genesis backfill, v3 indexing, volume measurement
 - [x] v3 pools quotable: `/quote` takes a v3 address, `/pools` lists identifiers
+- [x] v3 calldata: `/prepare-swap` builds for both protocols
 - [x] `POST /ask` + Farcaster reply queue
 - [ ] Reconcile the volume gap against Bankr's figure
 - [ ] Cross-check discovery against Blockscout (blocked: free tier allows ~10
@@ -454,12 +481,28 @@ causes it was. The payer address is used for per-payer usage counting
 entitlement — a paid call is a paid call.
 
 **Door 2 — this origin speaking `exact` itself**, for callers that would rather
-pay `oracle.sb4s.xyz` than a gateway. Bankr publishes no facilitator API for
-other people's servers, so `X402_FACILITATOR_URL` is a standard open
-facilitator (Coinbase's at `https://x402.org/facilitator`, or any conforming
-one) — pointing it at Bankr would 402 every caller with an error about
-signatures. With it set, `accepts[0]` is a real `exact` requirement on `base`
-and `x402-fetch` pays this service unchanged.
+pay `oracle.sb4s.xyz` than a gateway. `X402_FACILITATOR_URL` names who verifies
+and submits the authorization; with it set, `accepts[0]` is a real `exact`
+requirement on `base` and `x402-fetch` pays this service unchanged.
+
+Which facilitator is a question the check answers rather than one this README
+should assert. Bankr's own hosted endpoints advertise
+`https://api.bankr.bot/facilitator` in their 402 bodies, but Bankr documents it
+as the facilitator *behind those endpoints* rather than as an open one for
+other people's origins — it may or may not verify for this one. Coinbase's
+`https://x402.org/facilitator` is the standard open alternative. Run
+`npm run x402:check -- <url>` against each and use whichever answers
+`/supported` with `exact` on `base`; a wrong guess here 402s every caller with
+an error about signatures, which reads to them as their problem.
+
+**Two spellings are read where Bankr's own surfaces disagree.** The payment
+header is `X-PAYMENT` for x402-fetch and `PAYMENT-SIGNATURE` in Bankr's
+hand-rolled example, so both are accepted. The price field is
+`maxAmountRequired` in v1 and `amount` in the v2 bodies Bankr emits, so the 402
+carries both — the same number under two keys costs one field and saves a class
+of client that reads the wrong one and finds nothing. The version a payer
+declares is the version the facilitator is asked to verify, rather than being
+rewritten to whatever this service advertises (`X402_VERSION`, default 1).
 
 ```
 GET /quote            → 402  { accepts: [ {scheme:"exact", …}, {scheme:"onchain-transfer-credit", …} ] }

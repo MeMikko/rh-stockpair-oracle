@@ -1,0 +1,102 @@
+{
+  "network": "base",
+  "currency": "USDC",
+  "services": {
+    "vates": {
+      "description": "Stock-pair oracle for Robinhood Chain (4663): implied USD price, pool depth, price impact from an on-chain quoter, deviation vs Chainlink, whether the underlying market is open, and upcoming corporate actions. Uniswap v4 AND v3 — v3 carries roughly a third of stock-paired volume. Deterministic; no model in the data path. Index freshness (/health) and Chainlink coverage (/coverage) are free at oracle.sb4s.xyz and are deliberately not sold through this endpoint.",
+      "price": "0.02",
+      "methods": ["GET", "POST"],
+      "category": "data",
+      "tags": [
+        "robinhood-chain",
+        "tokenized-stocks",
+        "uniswap",
+        "oracle",
+        "chainlink",
+        "corporate-actions"
+      ],
+      "schema": {
+        "input": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "description": "Which oracle route to call. Defaults to /quote. /health and /coverage are free and are NOT sold here — call https://oracle.sb4s.xyz/health and /coverage directly.",
+              "enum": [
+                "/quote",
+                "/gas",
+                "/price",
+                "/pools",
+                "/volume",
+                "/corporate-actions",
+                "/ask",
+                "/prepare-swap"
+              ]
+            },
+            "pool": {
+              "type": "string",
+              "description": "/quote only: a Uniswap v4 poolId (32 bytes) or a v3 pool address. Get one from route=/pools."
+            },
+            "size": {
+              "type": "number",
+              "description": "/quote only: trade size in whole tokens of the paired side; adds a quoter-simulated price impact."
+            },
+            "symbol": {
+              "type": "string",
+              "description": "/price, /pools: stock ticker as listed on chain 4663, e.g. NVDA."
+            },
+            "withinDays": {
+              "type": "integer",
+              "description": "/corporate-actions only: how far ahead to look. Defaults to 30."
+            },
+            "question": {
+              "type": "string",
+              "description": "/ask only (POST): free-text question. The answer carries the facts behind it and a call that reproduces it."
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "description": "/quote: v4 or v3 — which protocol the pool belongs to."
+            },
+            "price": {
+              "type": "object",
+              "description": "/quote: spot as currency1 per currency0, and the implied USD price of the paired token where a Chainlink feed exists."
+            },
+            "depth": {
+              "type": "object",
+              "description": "/quote: ACTIVE-TICK ESTIMATE of pool depth. It can mislead; size a trade on impact instead."
+            },
+            "impact": {
+              "type": "object",
+              "description": "/quote with size: amountOut, executionPrice, priceImpact and gasEstimate from an on-chain quoter simulation. `source` names the quoter (quoter for v4, quoter-v3 for v3)."
+            },
+            "oracle": {
+              "type": "object",
+              "description": "/quote: Chainlink feed read, deviation, and deviationReason. deviation: null is normal and NEVER means zero — 159 of 194 stock tokens have no feed, so a deviation is unknowable rather than absent."
+            },
+            "corporateAction": {
+              "type": "object",
+              "description": "/quote: the pricing asset's current and pending ERC-8056 UI multiplier, and when a pending one takes effect."
+            },
+            "market": {
+              "type": "object",
+              "description": "/quote: whether the underlying equity market is open, from an exchange calendar rather than a feed."
+            },
+            "pools": {
+              "type": "array",
+              "description": "/pools: the top pool identifiers for a stock, ordered by measured 24h swaps, each with the /quote call that prices it. swaps24h: null means never measured, not measured at zero."
+            },
+            "answer": {
+              "type": "string",
+              "description": "/ask: the answer text, alongside `facts` (every number it cites) and `reproduce` (a different route returning the same figure)."
+            }
+          }
+        }
+      }
+    }
+  }
+}

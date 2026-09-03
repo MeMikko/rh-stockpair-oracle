@@ -101,6 +101,17 @@ describe('402 body', () => {
     }
   });
 
+  /**
+   * v1 calls the price `maxAmountRequired`; the v2 bodies Bankr's own
+   * endpoints emit call it `amount`. A client reading the other key would find
+   * nothing, so both carry the same number.
+   */
+  it('carries the price under both spellings', () => {
+    for (const accept of body.accepts) {
+      expect(accept.amount).toBe(accept.maxAmountRequired);
+    }
+  });
+
   it('still offers the credit scheme, honestly named', () => {
     const credit = body.accepts.find((a) => a.scheme === LEGACY_SCHEME);
     expect(credit).toBeDefined();

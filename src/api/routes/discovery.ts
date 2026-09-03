@@ -53,7 +53,8 @@ export function serviceDescriptor(): Record<string, unknown> {
         'implied USD, depth, price impact, Chainlink deviation, market hours. Takes a v4 ' +
         'poolId or a v3 pool address; `protocol` in the response says which',
       'POST /prepare-swap':
-        'unsigned UniversalRouter calldata with a min-out from the quoter. v4 pools only',
+        'unsigned calldata with a min-out from the quoter: UniversalRouter for a v4 pool, ' +
+        'SwapRouter for a v3 pool. Single-hop only; v3 requires an explicit recipient',
       'POST /ask': 'free-text question; returns facts and a reproduce call',
       'GET /x402/supported': 'which payment schemes and network this deployment settles',
       'POST /x402/topup': 'turn a USDC transfer into prepaid credit: {"txHash": "0x…"}',
@@ -206,10 +207,11 @@ export function serviceDescriptor(): Record<string, unknown> {
 
     limits: {
       v3Calldata:
-        'POST /prepare-swap is v4 only. A v3 pool is indexed and quotable but answers 501 ' +
-        'there: v3 routes through SwapRouter02 with a plain ERC-20 approval rather than the ' +
-        'UniversalRouter with Permit2, so the calldata is a different shape and nothing here ' +
-        'will emit a half-correct version of it.',
+        'A v3 swap is a different shape, not a different address: it calls the v3 router ' +
+        'directly with one plain ERC-20 approval (no Permit2, no second approval), names its ' +
+        'recipient in the calldata rather than defaulting to the sender, and takes its ' +
+        'deadline from multicall or from the params depending on which router is deployed. ' +
+        'The response says which, and whether that was read off the chain or configured.',
       multiHopSwaps:
         "not supported. RH's UniversalRouter ExactInputParams carries a field upstream " +
         'v4-periphery does not have; it was empty in every live sample decoded, so its type ' +

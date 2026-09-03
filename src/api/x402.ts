@@ -52,6 +52,15 @@ import { tierForSession } from '../auth/session.js';
  */
 
 const HEADER_PAYMENT = 'x-payment';
+/**
+ * The other name the same thing travels under.
+ *
+ * x402-fetch and every client built on it send `X-PAYMENT`. Bankr's own
+ * hand-rolled example sends `PAYMENT-SIGNATURE`. Both are the same base64
+ * payload, so both are read: refusing a payment over the header it arrived in
+ * is a 402 the caller cannot debug.
+ */
+const HEADER_PAYMENT_ALT = 'payment-signature';
 const HEADER_RESPONSE = 'x-payment-response';
 
 
@@ -86,7 +95,11 @@ export function requirementsFor(route: string, domain: AssetDomain): PaymentRequ
     out.push({
       scheme: 'exact',
       network: x402Config.network,
+      // Both spellings of the price: v1 says maxAmountRequired, the v2 bodies
+      // Bankr emits say amount. Same number, one extra field, one fewer class
+      // of client that reads the wrong key and finds nothing.
       maxAmountRequired: units.toString(),
+      amount: units.toString(),
       // Absolute, so an authorization signed for this service cannot be
       // replayed against another deployment of this code.
       resource: resourceUrl(route),
@@ -110,6 +123,7 @@ export function requirementsFor(route: string, domain: AssetDomain): PaymentRequ
     assetDecimals: paymentConfig.usdcDecimals,
     payTo: paymentConfig.treasury,
     maxAmountRequired: units.toString(),
+    amount: units.toString(),
     resource: resourceUrl(route),
     description: `One call to ${route}`,
     mimeType: 'application/json',
@@ -136,8 +150,8 @@ export function payment402Body(route: string, domain: AssetDomain) {
       facilitator: hasExact ? x402Config.facilitatorUrl : null,
       standardX402Note: hasExact
         ? 'scheme `exact`: sign an EIP-3009 authorization, send it base64-encoded in the ' +
-          'X-PAYMENT header, and it is verified and settled through the facilitator above. ' +
-          'Gas is the facilitator’s, not yours.'
+          'X-PAYMENT header (PAYMENT-SIGNATURE is read too), and it is verified and settled ' +
+          'through the facilitator above. Gas is the facilitator’s, not yours.'
         : 'No facilitator is configured on this deployment, so the `exact` scheme is not ' +
           'offered. Pay through the Bankr gateway below, or use the credit scheme.',
       // The alternative, said explicitly because it is the part that differs
@@ -385,7 +399,9 @@ export function registerX402(app: FastifyInstance): void {
     if (tierForSession(token).tier === 'pro') return;
 
     const cost = priceUnitsFor(route);
-    const presented = readPaymentHeader(req.headers[HEADER_PAYMENT]);
+    const presented = readPaymentHeader(
+      req.headers[HEADER_PAYMENT] ?? req.headers[HEADER_PAYMENT_ALT],
+    );
     const domain = await assetDomain();
 
     const refuse = (extra: Record<string, unknown> = {}, error = 'payment required') =>

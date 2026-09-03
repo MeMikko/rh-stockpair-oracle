@@ -15,16 +15,20 @@
  *     `https://x402.bankr.bot/<wallet>/<service>`. It issues the 402, takes
  *     the payment, settles on Base, and forwards the verified request here
  *     with `x-402-payer` naming who paid. Nothing about payment happens in
- *     this process on that path. Bankr publishes no facilitator API for
- *     other people's servers, so this is *the* way to be paid through Bankr —
- *     and it is also where agents that already pay through Bankr look.
+ *     this process on that path, and it is where agents that already pay
+ *     through Bankr look.
  *  2. **This origin, speaking `exact` directly.** For callers that would
  *     rather pay `oracle.sb4s.xyz` than a gateway: the caller signs an
- *     EIP-3009 authorization, and a standard open facilitator (Coinbase's at
- *     https://x402.org/facilitator, or any conforming one) verifies and
- *     submits it. `X402_FACILITATOR_URL` is that facilitator, and it is not
- *     Bankr's — asking Bankr for a `/verify` it does not publish would 402
- *     every caller with an error about signatures.
+ *     EIP-3009 authorization, and a facilitator verifies and submits it.
+ *
+ * **Which facilitator is an open question, and the check answers it.** Bankr's
+ * own x402 Cloud endpoints advertise `https://api.bankr.bot/facilitator` in
+ * their 402 bodies, but Bankr documents it as the facilitator *behind their
+ * hosted endpoints* rather than as an open one for other people's origins;
+ * whether it verifies and settles for this origin is a question for
+ * `npm run x402:check`, not for a comment. Coinbase's
+ * https://x402.org/facilitator is the standard open alternative. Point
+ * `X402_FACILITATOR_URL` at whichever one the check says works.
  *
  * **Nothing here is a guess that fails silently.** The facilitator URL has no
  * default, and `npm run x402:check` asks whatever is configured what it
@@ -41,7 +45,8 @@ export const x402Config = {
    * advertised at all — the 402 then carries the credit scheme and the Bankr
    * gateway, and says why.
    *
-   * NOT a Bankr URL. Bankr's x402 offering is the hosted gateway below.
+   * See the note above on which URL belongs here: `npm run x402:check` is the
+   * arbiter, not a comment in this file.
    */
   facilitatorUrl: env('X402_FACILITATOR_URL').replace(/\/+$/, ''),
 
@@ -50,6 +55,16 @@ export const x402Config = {
 
   /** Network name as the facilitator names it. x402 uses slugs, not chain ids. */
   network: env('X402_NETWORK') || 'base',
+
+  /**
+   * Protocol version advertised in the 402 body.
+   *
+   * The published spec this implements is 1; Bankr's hosted endpoints emit 2.
+   * A caller's own version is never overridden by this -- whatever version a
+   * payment payload declares is what the facilitator is asked to verify --
+   * so this only decides what an unpaid caller is told to speak.
+   */
+  version: Number(env('X402_VERSION') || 1),
 
   /**
    * Public base URL, used to build the absolute `resource` a payment is
