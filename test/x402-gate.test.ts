@@ -311,11 +311,31 @@ describe('a free route reached through the gateway', () => {
     expect(res.headers['x-oracle-free-at-origin']).toBe('https://oracle.sb4s.xyz/health');
   });
 
+  /**
+   * The header is for a person's client; the body is what an agent reads. A
+   * notice only in a header is a notice to nobody.
+   */
+  it('says it in the body too, without disturbing what was there', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { 'x-bankr-secret': SECRET, 'x-402-payer': PAYER_ADDR },
+    });
+    const body = res.json();
+    expect(body.ok).toBe(true);
+    expect(body.freeAtOrigin.url).toBe('https://oracle.sb4s.xyz/health');
+    expect(body.freeAtOrigin.note).toMatch(/free/i);
+    // Rewritten payloads have bitten this file before: a stale content-length
+    // truncates the body at the client rather than here.
+    expect(Number(res.headers['content-length'])).toBe(Buffer.byteLength(res.payload));
+  });
+
   /** Nothing to say to a caller who came here directly: they paid nothing. */
   it('says nothing to a caller who did not come through the gateway', async () => {
     const res = await app.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
     expect(res.headers['x-oracle-free-at-origin']).toBeUndefined();
+    expect(res.json().freeAtOrigin).toBeUndefined();
   });
 
   /** A forged secret is not a gateway request, here as everywhere else. */

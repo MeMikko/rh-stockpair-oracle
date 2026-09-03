@@ -417,6 +417,42 @@ export function registerX402(app: FastifyInstance): void {
     reply.header('x-oracle-free-at-origin', resourceUrl(free));
   });
 
+  /**
+   * The same fact in the body, because that is what an agent reads.
+   *
+   * A header is for a client written by a person. The callers this service is
+   * built for parse the JSON and never look at the headers, so a notice only
+   * in a header is a notice to nobody. Additive: no existing field changes, so
+   * a consumer that does not know about this one is unaffected.
+   *
+   * Keyed off the header set above, which is set only for a trusted gateway
+   * request on a free route -- so a direct caller's response is untouched.
+   */
+  app.addHook('onSend', async (_req, reply, payload) => {
+    const free = reply.getHeader('x-oracle-free-at-origin');
+    if (typeof free !== 'string' || typeof payload !== 'string') return payload;
+    if (!payload.startsWith('{')) return payload;
+    let body: unknown;
+    try {
+      body = JSON.parse(payload);
+    } catch {
+      return payload;
+    }
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) return payload;
+    const text = JSON.stringify({
+      ...(body as Record<string, unknown>),
+      freeAtOrigin: {
+        url: free,
+        note:
+          'This route is free. You reached it through the Bankr gateway, which prices its ' +
+          'whole path space and charged for this call; the URL above is the same answer at ' +
+          'no cost. Nothing here can refund what was already settled.',
+      },
+    });
+    reply.header('content-length', Buffer.byteLength(text));
+    return text;
+  });
+
   app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
     if (pricingMode !== 'paid') return;
     const route = req.routeOptions?.url;
