@@ -356,24 +356,13 @@ Caddy does not publish it. Reach it through an SSH tunnel:
 ssh -L 8090:127.0.0.1:8090 oracle-box     # then open http://127.0.0.1:8090
 ```
 
-A unit for it, started only when wanted:
+`ops/systemd/rh-oracle-admin.service` ships with the rest and is installed by
+the deploy, but **not enabled**: a process holding the wallet key has no reason
+to run while nobody is looking at it.
 
-```ini
-# /etc/systemd/system/rh-oracle-admin.service
-[Unit]
-Description=RH oracle operator panel
-After=network-online.target
-
-[Service]
-User=oracle
-WorkingDirectory=/opt/rh-oracle
-EnvironmentFile=/opt/rh-oracle/.env
-EnvironmentFile=/opt/rh-oracle/.env.admin
-ExecStart=/usr/bin/npm run admin
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
+```bash
+sudo systemctl start rh-oracle-admin     # when you need the panel
+sudo systemctl stop  rh-oracle-admin     # when you are done
 ```
 
 Two gates, not one. The port is not routable, **and** sign-in requires an

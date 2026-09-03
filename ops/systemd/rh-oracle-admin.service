@@ -1,0 +1,52 @@
+[Unit]
+Description=RH oracle operator panel
+Documentation=https://github.com/MeMikko/rh-stockpair-oracle
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oracle
+Group=oracle
+WorkingDirectory=/opt/rh-oracle
+
+# Two files, in this order, and no variable in both. .env carries the shared
+# configuration every unit needs; .env.admin carries the one credential that
+# can sign, transfer and launch tokens. Only this unit reads the second, which
+# is the whole reason it exists -- rh-oracle-api refuses to start if
+# BANKR_API_KEY reaches its environment.
+Environment=ADMIN_PORT=8090
+Environment=ADMIN_HOST=127.0.0.1
+EnvironmentFile=/opt/rh-oracle/.env
+EnvironmentFile=/opt/rh-oracle/.env.admin
+
+# Loopback by design: Caddy does not publish this and it must never be given a
+# site block. Reach it with  ssh -L 8090:127.0.0.1:8090 <box>.
+ExecStart=/usr/bin/node --env-file-if-exists=/opt/rh-oracle/.env --env-file-if-exists=/opt/rh-oracle/.env.admin --import tsx scripts/admin.ts
+Restart=on-failure
+RestartSec=5
+
+# Deliberately NOT enabled by default. Start it when you need the panel and
+# stop it when you are done: a process holding the wallet key has no reason to
+# be running while nobody is looking at it.
+#
+#   sudo systemctl start rh-oracle-admin
+#   sudo systemctl stop  rh-oracle-admin
+
+MemoryMax=512M
+CPUWeight=50
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/rh-oracle/data
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# It talks to api.bankr.bot and binds one loopback port. Nothing else.
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
