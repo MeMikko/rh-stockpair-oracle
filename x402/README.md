@@ -74,16 +74,35 @@ Four things follow, and none of them were assumptions before this was run:
 
 `…/vates/health` and `…/vates/coverage` cost $0.02 through the gateway. This
 origin cannot prevent it: Bankr settles before the request arrives, and there
-is nothing here to refund. Excluding those two paths is a change on Bankr's
-side, and until it is made, the honest thing is to say so — which is why the
-skill and the catalogue now name the free direct URLs, and why a free route
-reached through the gateway answers with
+is nothing here to refund.
+
+**Bankr cannot fix it either**, asked and answered: the gateway cannot exclude
+paths, and cannot price endpoints separately. One price for the path space is
+the product. So this is not a temporary state waiting on a change — it is how
+the gateway works, and the only remaining move is to make sure nobody pays for
+these twice.
+
+A free route reached through a trusted gateway request therefore answers with
+both a header and a body field:
 
 ```
 x-oracle-free-at-origin: https://oracle.sb4s.xyz/health
+
+{ "ok": true, …, "freeAtOrigin": { "url": "https://oracle.sb4s.xyz/health",
+  "note": "This route is free. You reached it through the Bankr gateway, …" } }
 ```
 
-so a caller pays for that answer once rather than every time.
+The header is for a client someone wrote by hand; the body is what an agent
+reads, and an agent is who calls this. The skill and the catalogue say the same
+thing before the first call, so the common case is that nobody pays at all.
+
+Serving the answer is deliberate rather than refusing it. Bankr settles a
+Cloud **handler**'s response only when it is under 400, but the gateway here is
+the proxy, not a handler, and whether a 4xx from this origin prevents its
+settlement is not something this repo can test without spending real USDC to
+find out. Refusing would be right if it does and would take the caller's money
+for nothing if it does not. Serving costs them $0.02 once and tells them why,
+under either answer.
 
 ## The handler in this directory, and when it applies
 
