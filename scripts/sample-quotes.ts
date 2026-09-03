@@ -72,10 +72,16 @@ if (!dry) {
 for (const f of failures) console.error(`  ! ${f.pool.slice(0, 12)}…: ${f.error}`);
 
 const depth = historyDepth();
+// Said carefully on a dry run: the stored depth is whatever the timer has
+// already written, and reporting it as "history now" after "would write 20"
+// reads as though this run had contributed those rows. It did not.
+const stored = dry
+  ? `history unchanged at ${depth.snapshots} snapshots across ${depth.symbols} symbols`
+  : `history now ${depth.snapshots} snapshots across ${depth.symbols} symbols`;
 console.log(
   `\n${dry ? 'would write' : 'wrote'} ${rows.length} snapshots` +
     (failures.length ? `, ${failures.length} failed` : '') +
-    ` | history now ${depth.snapshots} snapshots across ${depth.symbols} symbols` +
+    ` | ${stored}` +
     (depth.since ? `, since ${new Date(depth.since).toISOString()}` : ''),
 );
 
