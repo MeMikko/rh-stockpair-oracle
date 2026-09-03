@@ -13,53 +13,83 @@ import { resolve } from 'node:path';
  * Never overwrites a value that is already set. This edits the file holding
  * live credentials on a production box, so the only safe default is to add.
  *
- *   npm run secrets            # fill what is missing, report the rest
- *   npm run secrets -- --show  # also print generated values
+ *   npm run secrets              # .env: fill what is missing, report the rest
+ *   npm run secrets -- --admin   # the same for .env.admin
+ *   npm run secrets -- --show    # also print generated values
  *   npm run secrets -- --rotate=USAGE_SALT
  */
 
+/**
+ * Which file a secret belongs in.
+ *
+ * `.env.admin` exists so the wallet-scoped credential is not in the file the
+ * public units read, and that separation is worth nothing if this script
+ * cheerfully writes an admin secret into `.env` because that is where it
+ * happened to be pointed.
+ */
+type Home = 'env' | 'admin';
+const targetIsAdmin =
+  process.argv.includes('--admin') || (process.env.ENV_FILE ?? '').includes('.admin');
+const here = (home: Home): boolean => (home === 'admin') === targetIsAdmin;
+
 /** Secrets with no external authority: we can just make one up, safely. */
-const GENERATED: Record<string, { bytes: number; note: string }> = {
+const GENERATED: Record<string, { bytes: number; note: string; home: Home }> = {
   USAGE_SALT: {
     bytes: 32,
+    home: 'env',
     note: 'hashes caller addresses in the usage counter; rotating it resets caller identity, not counts',
   },
   NEYNAR_WEBHOOK_SECRET: {
     bytes: 32,
+    home: 'env',
     note: 'MUST match the secret Neynar shows for the webhook — if Neynar issued one, paste theirs instead',
   },
   ADMIN_AUTH_SECRET: {
     bytes: 32,
+    home: 'admin',
     note: 'signs operator-panel sessions; must differ from AUTH_SECRET so a public session is not an admin one',
   },
 };
 
 /** Issued elsewhere. Generating a value here would only fake being configured. */
-const EXTERNAL: Record<string, string> = {
-  ALCHEMY_API_KEY: 'alchemy.com — state and archive reads',
-  BLOCKSCOUT_API_KEY: 'dev.blockscout.com — explorer, optional',
-  NEYNAR_API_KEY: 'dev.neynar.com — required to read mentions or cast',
-  NEYNAR_SIGNER_UUID: 'dev.neynar.com — must be an approved signer, made with the same API key',
-  NEYNAR_AGENT_FID: "the agent account's own FID, not yours",
-  BANKR_LLM_KEY: 'bankr.bot/api-keys — LLM Gateway ONLY; optional, drafts fall back to templates without it',
-  BANKR_API_KEY: 'bankr.bot/api-keys — wallet + token launch. ADMIN BOX ONLY; the public server refuses to boot with it',
-  ADMIN_ADDRESSES: 'the addresses allowed into the operator panel; not a secret, but the panel will not start without it',
+const EXTERNAL: Record<string, { where: string; home: Home }> = {
+  ALCHEMY_API_KEY: { home: 'env', where: 'alchemy.com — state and archive reads' },
+  BLOCKSCOUT_API_KEY: { home: 'env', where: 'dev.blockscout.com — explorer, optional' },
+  NEYNAR_API_KEY: { home: 'env', where: 'dev.neynar.com — required to read mentions or cast' },
+  NEYNAR_SIGNER_UUID: {
+    home: 'env',
+    where: 'dev.neynar.com — must be an approved signer, made with the same API key',
+  },
+  NEYNAR_AGENT_FID: { home: 'env', where: "the agent account's own FID, not yours" },
+  BANKR_LLM_KEY: {
+    home: 'env',
+    where: 'bankr.bot/api-keys — LLM Gateway ONLY; without it drafts fall back to templates',
+  },
+  BANKR_API_KEY: {
+    home: 'admin',
+    where: 'bankr.bot/api-keys — wallet + token launch; the public server refuses to boot with it',
+  },
+  ADMIN_ADDRESSES: {
+    home: 'admin',
+    where: 'addresses allowed into the panel; not a secret, but the panel will not start without one',
+  },
 };
 
 const arg = (n: string): string | undefined =>
   process.argv.find((a) => a.startsWith(`--${n}=`))?.split('=').slice(1).join('=');
 const flag = (n: string): boolean => process.argv.includes(`--${n}`);
 
-const envPath = resolve(process.env.ENV_FILE ?? '.env');
-const examplePath = resolve('.env.example');
+const envPath = resolve(process.env.ENV_FILE ?? (targetIsAdmin ? '.env.admin' : '.env'));
+const exampleName = targetIsAdmin ? '.env.admin.example' : '.env.example';
+const examplePath = resolve(exampleName);
 
 if (!existsSync(envPath)) {
   if (!existsSync(examplePath)) {
-    console.error(`neither ${envPath} nor .env.example exists; nothing to work from`);
+    console.error(`neither ${envPath} nor ${exampleName} exists; nothing to work from`);
     process.exit(1);
   }
   copyFileSync(examplePath, envPath);
-  console.log(`created ${envPath} from .env.example`);
+  console.log(`created ${envPath} from ${exampleName}`);
 }
 
 let text = readFileSync(envPath, 'utf8');
@@ -83,6 +113,7 @@ if (rotate && !(rotate in GENERATED)) {
 
 const generated: string[] = [];
 for (const [key, spec] of Object.entries(GENERATED)) {
+  if (!here(spec.home)) continue;
   const current = valueOf(key);
   const empty = current === null || current === '';
   if (!empty && rotate !== key) continue;
@@ -118,7 +149,8 @@ if (generated.length === 0) {
   if (!flag('show')) console.log('\n  (re-run with --show to print the values)');
 }
 
-const missing = Object.entries(EXTERNAL).filter(([k]) => {
+const missing = Object.entries(EXTERNAL).filter(([k, spec]) => {
+  if (!here(spec.home)) return false;
   const v = valueOf(k);
   return v === null || v === '';
 });
@@ -128,8 +160,15 @@ if (missing.length === 0) {
   console.log('external secrets: all set');
 } else {
   console.log(`external secrets still missing (${missing.length}) — these must be issued elsewhere:`);
-  for (const [k, where] of missing) console.log(`  ${k.padEnd(22)} ${where}`);
+  for (const [k, spec] of missing) console.log(`  ${k.padEnd(22)} ${spec.where}`);
 }
+
+// The other file, named rather than left to be remembered.
+console.log(
+  targetIsAdmin
+    ? '\nThat was .env.admin. The public units read .env: npm run secrets'
+    : '\nThe operator panel has its own file: npm run secrets -- --admin',
+);
 
 if (generated.includes('NEYNAR_WEBHOOK_SECRET')) {
   console.log(
