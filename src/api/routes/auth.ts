@@ -39,10 +39,16 @@ function tokenFrom(req: { headers: Record<string, unknown> }): string | undefine
 export function registerAuth(app: FastifyInstance): void {
   app.get('/auth/nonce', async (req, reply) => {
     if (!authConfigured()) return reply.code(503).send({ error: 'sign-in not configured' });
-    const address = (req.query as { address?: string } | undefined)?.address?.trim();
+    const raw = (req.query as { address?: string } | undefined)?.address?.trim();
     const nonce = issueNonce();
+    // Lowercased, because verification rebuilds the message from the
+    // normalised address. A caller passing a checksummed address used to get
+    // back a message whose signature could never verify -- browser wallets
+    // hand out lowercase, so it only bit callers that typed the address.
+    const address = raw && /^0x[0-9a-fA-F]{40}$/.test(raw) ? raw.toLowerCase() : null;
     return {
       nonce,
+      address,
       // The exact bytes to sign, so a caller never has to reconstruct the
       // message and get a byte wrong.
       message: address ? signInMessage(address, nonce) : null,
