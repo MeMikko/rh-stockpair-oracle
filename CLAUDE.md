@@ -5,9 +5,9 @@ Build a useful, visible, open-source agent in the Bankr ecosystem. Adoption
 comes first — success = other agents call it, Bankr/Long people notice it, and
 the public feed says things nobody else can say.
 
-**It is not a free service and must never be advertised as one.** Prices are
-published from launch even though nothing is charged yet: **$0.02 for every
-priced route**, `/health` and `/coverage` free. One price rather than tiers
+**It is not a free service and must never be advertised as one.** Billing has
+been on since 2026-09-03 (`PRICING_MODE=paid`): **$0.02 for every priced
+route**, `/health` and `/coverage` free. One price rather than tiers
 because Bankr's gateway prices an endpoint, not a route -- a split it does not
 honour would be a published price callers are not charged. Every priced response carries `x-oracle-price-usd`,
 `x-oracle-charged-usd` and `x-oracle-pricing`. "Free forever" is a promise that
@@ -49,8 +49,13 @@ than earn margin; see `config/pricing.ts`.
 4. **Distribution** – deployed at https://oracle.sb4s.xyz; PR to
    https://github.com/BankrBot/skills with a SKILL.md + catalog.json pending.
    The RH category in that catalog holds only `hoodmarkets` and `rhagent`.
-   x402 has two doors. Bankr's is a hosted **gateway** (not a facilitator, and
-   it publishes none): `x402.bankr.bot/<wallet>/vates` fronts this origin,
+   x402 has two doors. Bankr's is a hosted **gateway** — measured 2026-09-03 as
+   a path-preserving reverse proxy (x402 v2, `eip155:8453`) with its 402 over
+   the whole path space, which is why `/health` and `/coverage` cost $0.02
+   *through it* and are free at the origin; Bankr cannot exclude paths or price
+   them separately, so a free route reached through the gateway answers with
+   `freeAtOrigin` naming the URL where it costs nothing.
+   `x402.bankr.bot/<wallet>/vates` fronts this origin,
    collects the USDC and forwards the request with `x-402-payer`, trusted only
    when `x-bankr-secret` matches `VATES_BACKEND_SECRET`. Direct callers pay the
    origin with scheme `exact` through a standard open facilitator
@@ -114,8 +119,15 @@ necessary (none planned).
 2. ✅ `/prepare-swap` + `/gas`.
 3. ✅ Corporate-action calendar + public agent with approval queue.
 4. ✅ Deployment + skill package. ⬜ skills-repo PR.
-5. ⬜ Set `VATES_BACKEND_SECRET` on both sides of the Bankr gateway, point
-   `X402_FACILITATOR_URL` at a standard facilitator, confirm both with
-   `npm run x402:check`, then flip `PRICING_MODE=paid`.
+5. ✅ `VATES_BACKEND_SECRET` set on both sides, verified end to end (a forged
+   secret gets 402, the real one 200), and `PRICING_MODE=paid` since
+   2026-09-03. `X402_FACILITATOR_URL` is deliberately **empty**: measured
+   2026-09-03, x402.org settles `exact` on testnets only, api.bankr.bot has no
+   `/supported`, and Coinbase CDP needs a key. The origin now asks
+   `/supported` before advertising `exact`, so an empty setting means the
+   scheme is honestly absent rather than promised and refused. Paying works
+   through the Bankr gateway and through prepaid credit; set the facilitator
+   the day `npm run x402:check -- <url>` finds one that settles `exact` on
+   Base, and `exact` turns itself back on.
 
 Target: first public post ready before the gas subsidy ends (late Sept 2026).

@@ -144,8 +144,8 @@ bankr x402 env set VATES_BACKEND_SECRET=<same>
 ```
 
 Bankr's docs call the secret optional. Here it is not: with it unset there is
-no trusted gateway path at all, which is harmless while `PRICING_MODE=launch`
-and a 402 that gateway callers cannot fix once billing is on. `GET
+no trusted gateway path at all — and with billing on, that is a 402 every
+gateway caller gets and none of them can fix. `GET
 /x402/supported` reports whether the origin can currently tell a gateway
 request from a forgery.
 

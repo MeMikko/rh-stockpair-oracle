@@ -14,21 +14,23 @@ carries the facts behind it.
 **Base URL:** `https://oracle.sb4s.xyz`
 **Source:** `https://github.com/MeMikko/rh-stockpair-oracle`
 
-**Pricing.** This is not a free service. It is currently in **launch mode**:
-every route is served without charge and no key is required, while each
-response publishes what the call will cost once billing is enabled.
+**Pricing.** This is not a free service, and as of 2026-09-03 it is **billing**:
+a priced route called without payment answers `402` with everything needed to
+pay it. Every response still says what it cost:
 
 ```
-x-oracle-price-usd: 0.02     what this route will cost
-x-oracle-charged-usd: 0      what it cost you today
-x-oracle-pricing: launch     the current mode
+x-oracle-price-usd: 0.02     what this route costs
+x-oracle-charged-usd: 0.02   what it cost you on this call
+x-oracle-pricing: paid       the current mode
 ```
 
-Read those headers rather than assuming. The intended price is **$0.02 for
-every priced route** — one figure, because Bankr's gateway prices an endpoint
-rather than a route, and a published split it does not honour would be a price
-callers are not charged. `/health` and `/coverage` stay free. Prices cover
-upstream cost rather than earn margin — adoption is the goal.
+Read those headers rather than assuming — the mode has changed once already and
+`x-oracle-pricing` is the only thing that knows the current one. The price is
+**$0.02 for every priced route** — one figure, because Bankr's gateway prices
+an endpoint rather than a route, and a published split it does not honour would
+be a price callers are not charged. `/health` and `/coverage` are free and stay
+free. Prices cover upstream cost rather than earn margin — adoption is the
+goal.
 
 ## Why this exists
 
@@ -189,7 +191,8 @@ curl 'https://oracle.sb4s.xyz/corporate-actions?withinDays=30&onlyAffecting=true
 The published calendar joined to the indexed pool set. Both halves are public;
 nothing else joins them. On this chain a dividend or split applies through the
 ERC-8056 `uiMultiplier`, so **every pool quoted in that stock reprices at
-once** — NVDA's next dividend touches 9,669 indexed pools.
+once** — NVDA's next dividend touches 10,394 indexed pools (9,942 v4 and 452
+v3, measured 2026-09-03; `GET /pools?symbol=NVDA` for the live count).
 
 Discovery comes from the published feed, not from chain events:
 `UIMultiplierUpdated` only fires when the multiplier actually changes, which is
@@ -237,9 +240,10 @@ deployment has a facilitator that will actually settle it, and `GET
 | **wallet signature** | session-based | `GET /auth/nonce?address=0x…` returns the exact message to sign → `personal_sign` → `POST /auth/verify {address, signature, nonce}` → bearer token |
 | **pro** | direct answers on Farcaster, unmetered | $5.99 USDC on Base for 30 days, `POST /pro/claim {txHash}`. Does not auto-renew. `POST /pro/link-fid {fid}` links a Farcaster account |
 
-In **launch mode** none is required — every route is served without charge —
-but each already works, and `x-oracle-pricing` tells you which mode you are in.
-Read that header rather than assuming.
+Billing is on, so a priced route needs one of these. `/health` and `/coverage`
+need none and never will. `x-oracle-pricing` tells you the mode you are in on
+every response — read it rather than assuming, including assuming this
+paragraph is still current.
 
 ## Agent guidance
 
@@ -256,7 +260,8 @@ Read that header rather than assuming.
   Bankr with `chainId: 4663` after your own validation. A 422 means the swap
   could not be bounded — do not construct calldata yourself to work around it.
 - **Do not hardcode a price.** Read `x-oracle-price-usd` and
-  `x-oracle-charged-usd` per response; launch mode will end.
+  `x-oracle-charged-usd` per response. Launch mode already ended once; the
+  headers are the only current answer.
 - **Do not compare these volume figures to another dashboard's.** Denominators
   differ; see the repository README for the measured breakdown and the
   unreconciled residual against Bankr's published number.
