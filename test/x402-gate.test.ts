@@ -26,6 +26,7 @@ process.env.X402_ASSET_VERSION = '2';
 
 const { getDb } = await import('../src/db/index.js');
 const { registerX402 } = await import('../src/api/x402.js');
+const { refreshSettlement } = await import('../src/payments/settleable.js');
 
 const realFetch = globalThis.fetch;
 
@@ -34,14 +35,33 @@ let verifyAnswer: unknown = { isValid: true, payer: '0xpayer' };
 let settleAnswer: unknown = { success: true, transaction: '0xsettled', network: 'base' };
 let facilitatorDown = false;
 
+/**
+ * What this stubbed facilitator says it settles.
+ *
+ * Named in CAIP-2 on purpose: a real facilitator answers either way, and the
+ * gate must not hide the `exact` door merely because the chain was spelled
+ * `eip155:8453` rather than `base`.
+ */
+const supportedAnswer = { kinds: [{ scheme: 'exact', network: 'eip155:8453' }] };
+
 globalThis.fetch = (async (url: string) => {
   if (facilitatorDown) throw new Error('connect ECONNREFUSED');
-  const body = String(url).endsWith('/verify') ? verifyAnswer : settleAnswer;
+  const path = String(url);
+  const body = path.endsWith('/supported')
+    ? supportedAnswer
+    : path.endsWith('/verify')
+      ? verifyAnswer
+      : settleAnswer;
   return new Response(JSON.stringify(body), {
     status: 200,
     headers: { 'content-type': 'application/json' },
   });
 }) as unknown as typeof fetch;
+
+// Warmed once, before any request: the 402 reads this from cache rather than
+// waiting on the facilitator, so an unwarmed cache would make the first call
+// of the run behave differently from the rest.
+await refreshSettlement();
 
 afterAll(() => {
   globalThis.fetch = realFetch;

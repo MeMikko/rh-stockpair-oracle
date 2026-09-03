@@ -19,6 +19,24 @@ const {
 } = await import('../src/api/x402.js');
 const { readGatewayRequest } = await import('../src/payments/gateway.js');
 const { claimPayment, claimCredit } = await import('../src/payments/verify.js');
+const { refreshSettlement } = await import('../src/payments/settleable.js');
+
+/**
+ * The facilitator, answering that it does settle `exact` on Base.
+ *
+ * Stubbed rather than called, and warmed before the bodies below are built:
+ * the 402 no longer advertises `exact` on the strength of a URL being set, so
+ * a body built without this answer would honestly omit the scheme and every
+ * assertion about it would be testing the wrong deployment.
+ */
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async () =>
+  new Response(JSON.stringify({ kinds: [{ scheme: 'exact', network: 'base' }] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })) as unknown as typeof fetch;
+await refreshSettlement();
+globalThis.fetch = realFetch;
 
 const PAYER = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
 const DOMAIN = { name: 'USD Coin', version: '2', source: 'chain' as const };

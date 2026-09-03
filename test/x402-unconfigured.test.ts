@@ -29,6 +29,8 @@ describe('no facilitator configured', () => {
 
   it('still names something that works', () => {
     expect(body.accepts[0]!.scheme).toBe('onchain-transfer-credit');
-    expect(body.settlement.standardX402Note).toMatch(/no facilitator/i);
+    // The note names the cause an operator can act on, rather than only the
+    // symptom: the environment variable that is not set.
+    expect(body.settlement.standardX402Note).toMatch(/X402_FACILITATOR_URL is not set/);
   });
 });
