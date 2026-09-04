@@ -6,6 +6,7 @@ import { readPoolState, priceFromSqrtX96 } from '../pricing/poolState.js';
 import { readV3PoolState } from '../pricing/poolStateV3.js';
 import { stockContext } from '../pricing/stockContext.js';
 import { marketStatus } from '../pricing/marketHours.js';
+import { flagForAdjacent } from './priceFlag.js';
 import { withRetry } from '../util/retry.js';
 
 /**
@@ -31,6 +32,8 @@ export interface Snapshot {
   block: number;
   stockSymbol: string | null;
   spot: number;
+  /** The exact Q64.96 price the chain returned, so anything derived can be rebuilt. */
+  sqrtPriceX96: string;
   impliedUsd: number | null;
   /** What the pool implies the stock is worth -- the number a reader asks for. */
   poolStockUsd: number | null;
@@ -100,13 +103,16 @@ export async function takeSnapshot(pool: SamplePool, at = Date.now()): Promise<S
 
   let spot: number;
   let liquidity: bigint;
+  let sqrtPriceX96: bigint;
 
   if (pool.protocol === 'v4') {
     const s = await readPoolState(pool.key as Hex, pool.fee);
+    sqrtPriceX96 = s.sqrtPriceX96;
     spot = priceFromSqrtX96(s.sqrtPriceX96, m0.decimals, m1.decimals);
     liquidity = s.liquidity;
   } else {
     const s = await readV3PoolState(pool.key as Address);
+    sqrtPriceX96 = s.sqrtPriceX96;
     spot = priceFromSqrtX96(s.sqrtPriceX96, m0.decimals, m1.decimals);
     liquidity = s.liquidity;
   }
@@ -130,6 +136,7 @@ export async function takeSnapshot(pool: SamplePool, at = Date.now()): Promise<S
     block: Number(block),
     stockSymbol: pool.stockSymbol,
     spot,
+    sqrtPriceX96: sqrtPriceX96.toString(),
     impliedUsd: ctx.impliedUsd,
     poolStockUsd: ctx.deviation.poolImpliedStockUsd,
     oracleUsd: ctx.oracle?.priceUsd ?? null,
@@ -146,23 +153,36 @@ export function saveSnapshots(rows: Snapshot[]): number {
   const db = getDb();
   const stmt = db.prepare(
     `INSERT OR IGNORE INTO quote_snapshots
-       (pool_key, protocol, at, block, stock_symbol, spot, implied_usd, pool_stock_usd,
-        oracle_usd, deviation, deviation_reason, liquidity, market_session, market_open)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (pool_key, protocol, at, block, stock_symbol, spot, sqrt_price_x96, implied_usd,
+        pool_stock_usd, oracle_usd, deviation, deviation_reason, liquidity,
+        market_session, market_open, price_flag)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  // The sample immediately before this one for the same pool. Flagging at
+  // write time rather than at read time means the stored series carries its
+  // own verdict, and a reader cannot forget to apply the rule.
+  const prior = db.prepare(
+    'SELECT at, spot FROM quote_snapshots WHERE pool_key = ? AND at < ? ORDER BY at DESC LIMIT 1',
   );
   db.exec('BEGIN');
   try {
     for (const r of rows) {
+      const prev = prior.get(r.poolKey, r.at) as { at: number; spot: string } | undefined;
+      const flag = flagForAdjacent(
+        prev ? { at: Number(prev.at), spot: Number(prev.spot) } : null,
+        { at: r.at, spot: r.spot },
+      );
       stmt.run(
         r.poolKey, r.protocol, r.at, r.block, r.stockSymbol,
         // Text, not REAL: these are ratios and money, and a float would round
         // away exactly the small deviations the series exists to record.
         String(r.spot),
+        r.sqrtPriceX96,
         r.impliedUsd === null ? null : String(r.impliedUsd),
         r.poolStockUsd === null ? null : String(r.poolStockUsd),
         r.oracleUsd === null ? null : String(r.oracleUsd),
         r.deviation === null ? null : String(r.deviation),
-        r.deviationReason, r.liquidity, r.marketSession, r.marketOpen ? 1 : 0,
+        r.deviationReason, r.liquidity, r.marketSession, r.marketOpen ? 1 : 0, flag,
       );
     }
     db.exec('COMMIT');

@@ -102,6 +102,15 @@ necessary (none planned).
 - `reproduce` must name something the *caller* can run, not the operator.
 - Keep the README honest about what is estimated vs measured, and record what
   did not reconcile rather than dropping it.
+- **A recorded price is not automatically evidence.** `quote_snapshots` stores
+  the raw sqrtPriceX96 next to the derived price, and flags a sample that moved
+  10%+ from the one before it within 20 minutes — on an AMM that is a real
+  trade, but one large enough relative to depth that the price describes that
+  order rather than a market. Flagged samples are counted separately and never
+  averaged into a published statistic. Inherited from HoodGrow, which learned
+  it 60 days late and could not re-judge its own history because it had kept
+  only the derived number; `npm run flag:prices` re-derives every flag, which
+  is the part that was missing there.
 - **Two Bankr keys, never one.** The public API holds a gateway-only key
   (`BANKR_LLM_KEY`) and refuses to boot with `BANKR_API_KEY` present; the
   wallet-scoped key lives only in the operator panel (`npm run admin`), which

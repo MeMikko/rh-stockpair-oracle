@@ -35,7 +35,8 @@ const app = Fastify();
 function snap(over: Partial<Snapshot>): Snapshot {
   return {
     poolKey: POOL, protocol: 'v3', at: Date.now(), block: 100, stockSymbol: 'NVDA',
-    spot: 0.0043, impliedUsd: 1, poolStockUsd: 229, oracleUsd: 229, deviation: 0,
+    spot: 0.0043, sqrtPriceX96: '79228162514264337593543950336', impliedUsd: 1,
+    poolStockUsd: 229, oracleUsd: 229, deviation: 0,
     deviationReason: null, liquidity: '1', marketSession: 'regular', marketOpen: true,
     ...over,
   };
@@ -109,6 +110,78 @@ describe('keeping the record', () => {
     expect(d.snapshots).toBe(2);
     expect(d.since).toBe(1_000);
     expect(d.symbols).toBe(1);
+  });
+});
+
+/**
+ * The failure HoodGrow found 60 days too late, on this deployment's third hour.
+ *
+ * Its prices were quote mids that could go one-sided; ours come from pool
+ * reserves and only move because someone traded. The rule is the same shape
+ * for a different reason: a trade large enough to move a pool 10% in a quarter
+ * hour sets a price that describes that order, not a market, and averaging it
+ * into "how far this pool drifts overnight" answers a different question.
+ */
+describe('prices not fit to compute a statistic from', () => {
+  const base = Date.now() - 2 * HOUR;
+
+  it('flags a jump between adjacent samples', () => {
+    saveSnapshots([snap({ at: base, spot: 100 })]);
+    saveSnapshots([snap({ at: base + 60_000, spot: 130 })]);
+    const rows = snapshotsForPool(POOL, 0);
+    expect(rows[0]!.priceFlag).toBeNull();
+    expect(rows[1]!.priceFlag).toBe('adjacent-jump');
+  });
+
+  /** Two days of ordinary movement is not a jump. This bound is why. */
+  it('does not compare across a gap in the record', () => {
+    saveSnapshots([snap({ at: base, spot: 100 })]);
+    saveSnapshots([snap({ at: base + 3 * 86_400_000, spot: 300 })]);
+    expect(snapshotsForPool(POOL, 0)[1]!.priceFlag).toBeNull();
+  });
+
+  it('keeps the raw price, so a future rule can re-judge the past', () => {
+    saveSnapshots([snap({ at: base, sqrtPriceX96: '12345' })]);
+    expect(snapshotsForPool(POOL, 0)[0]!.sqrtPriceX96).toBe('12345');
+  });
+
+  it('excludes a flagged sample from the mean and counts it', () => {
+    saveSnapshots([
+      ...series('closed', false, 0.02, 5, base),
+      snap({ at: base + 6 * 60_000, spot: 999, deviation: 0.9, marketSession: 'closed', marketOpen: false }),
+    ]);
+    const closed = driftBySession('NVDA', 0).find((s) => s.session === 'closed')!;
+    expect(closed.flagged).toBe(1);
+    expect(closed.samples).toBe(6);
+    expect(closed.usable).toBe(5);
+    // 0.9 would have dragged a mean of 0.02 to 0.167 had it been included.
+    expect(closed.meanAbsDeviation).toBeCloseTo(0.02, 6);
+  });
+
+  it('reports the flagged count in the free depth on /health', () => {
+    saveSnapshots([snap({ at: base, spot: 100 })]);
+    saveSnapshots([snap({ at: base + 60_000, spot: 130 })]);
+    expect(historyDepth().flagged).toBe(1);
+  });
+
+  /** A guard counted on raw samples would pass on eleven unusable ones. */
+  it('does not publish a finding built on flagged samples', () => {
+    saveSnapshots([
+      ...series('regular', true, 0.001, 20, base),
+      ...series('closed', false, 0.05, 3, base + HOUR),
+    ]);
+    // Nine more closed samples, every one a flagged jump: enough to clear a
+    // raw-count guard, not one of them usable.
+    for (let i = 0; i < 9; i += 1) {
+      saveSnapshots([
+        snap({ at: base + 2 * HOUR + i * 120_000, spot: 100, deviation: 0.05, marketSession: 'closed', marketOpen: false }),
+        snap({ at: base + 2 * HOUR + i * 120_000 + 60_000, spot: 130, deviation: 0.05, marketSession: 'closed', marketOpen: false }),
+      ]);
+    }
+    const closed = driftBySession('NVDA', 0).find((s) => s.session === 'closed')!;
+    expect(closed.samples).toBeGreaterThanOrEqual(12);
+    expect(closed.usable).toBeLessThan(12);
+    expect(detectClosedMarketDrift()).toHaveLength(0);
   });
 });
 

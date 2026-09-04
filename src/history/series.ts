@@ -15,6 +15,10 @@ export interface SnapshotRow {
   block: number;
   protocol: string;
   spot: number;
+  /** The exact price the chain returned; null on rows written before it was kept. */
+  sqrtPriceX96: string | null;
+  /** Null means the sample passed the rule, not that it went unchecked. */
+  priceFlag: string | null;
   impliedUsd: number | null;
   poolStockUsd: number | null;
   oracleUsd: number | null;
@@ -33,6 +37,8 @@ function mapRow(r: Record<string, unknown>): SnapshotRow {
     block: Number(r.block),
     protocol: String(r.protocol),
     spot: Number(r.spot),
+    sqrtPriceX96: (r.sqrt_price_x96 as string | null) ?? null,
+    priceFlag: (r.price_flag as string | null) ?? null,
     impliedUsd: num(r.implied_usd as string | null),
     poolStockUsd: num(r.pool_stock_usd as string | null),
     oracleUsd: num(r.oracle_usd as string | null),
@@ -78,11 +84,24 @@ export function bestSampledPool(symbol: string): { poolKey: string; samples: num
 export interface SessionStat {
   session: string;
   samples: number;
-  /** Mean of |deviation|, over samples where a deviation was measurable. */
+  /** Mean of |deviation|, over measurable samples that were not flagged. */
   meanAbsDeviation: number | null;
   maxAbsDeviation: number | null;
   /** Samples with no Chainlink feed, so no deviation was knowable. */
   unknowable: number;
+  /**
+   * Samples the statistic is actually computed from: a measured deviation and
+   * an unflagged price. Reported rather than left to be derived, because
+   * `samples - unknowable - flagged` is wrong whenever a row is both.
+   */
+  usable: number;
+  /**
+   * Samples excluded because the price they carry describes one order rather
+   * than a market. Counted, never silently dropped — the same reason
+   * `unknowable` is counted: a statistic that quietly narrows its own input
+   * reads as though it covered everything.
+   */
+  flagged: number;
 }
 
 /**
@@ -105,8 +124,16 @@ export function driftBySession(symbol: string, sinceMs: number): SessionStat[] {
       `SELECT market_session AS session,
               COUNT(*) AS samples,
               SUM(CASE WHEN deviation IS NULL THEN 1 ELSE 0 END) AS unknowable,
-              AVG(CASE WHEN deviation IS NULL THEN NULL ELSE ABS(CAST(deviation AS REAL)) END) AS meanAbs,
-              MAX(CASE WHEN deviation IS NULL THEN NULL ELSE ABS(CAST(deviation AS REAL)) END) AS maxAbs
+              SUM(CASE WHEN price_flag IS NOT NULL THEN 1 ELSE 0 END) AS flagged,
+              SUM(CASE WHEN deviation IS NOT NULL AND price_flag IS NULL THEN 1 ELSE 0 END) AS usable,
+              -- Flagged rows are excluded from the statistic and counted above.
+              -- A price set by one order large enough to move the pool 10% is a
+              -- fact about that order, and averaging it into "how far this pool
+              -- drifts overnight" would answer a different question.
+              AVG(CASE WHEN deviation IS NULL OR price_flag IS NOT NULL THEN NULL
+                       ELSE ABS(CAST(deviation AS REAL)) END) AS meanAbs,
+              MAX(CASE WHEN deviation IS NULL OR price_flag IS NOT NULL THEN NULL
+                       ELSE ABS(CAST(deviation AS REAL)) END) AS maxAbs
        FROM quote_snapshots
        WHERE stock_symbol = ? AND at >= ?
        GROUP BY market_session
@@ -118,6 +145,8 @@ export function driftBySession(symbol: string, sinceMs: number): SessionStat[] {
     session: String(r.session),
     samples: Number(r.samples),
     unknowable: Number(r.unknowable),
+    flagged: Number(r.flagged),
+    usable: Number(r.usable),
     meanAbsDeviation: r.meanAbs === null ? null : Number(r.meanAbs),
     maxAbsDeviation: r.maxAbs === null ? null : Number(r.maxAbs),
   }));
@@ -155,6 +184,8 @@ export function volumeHistory(poolKey: string, sinceTs: number, limit = 500): Vo
 
 export interface HistoryDepth {
   snapshots: number;
+  /** How many recorded samples carry a price not fit to compute a statistic from. */
+  flagged: number;
   volumeWindows: number;
   /** When recording began, or null before the first sample. */
   since: number | null;
@@ -173,13 +204,15 @@ export function historyDepth(): HistoryDepth {
   const db = getDb();
   const s = db
     .prepare(
-      `SELECT COUNT(*) AS n, MIN(at) AS since, COUNT(DISTINCT stock_symbol) AS symbols
+      `SELECT COUNT(*) AS n, MIN(at) AS since, COUNT(DISTINCT stock_symbol) AS symbols,
+              SUM(CASE WHEN price_flag IS NOT NULL THEN 1 ELSE 0 END) AS flagged
        FROM quote_snapshots`,
     )
-    .get() as { n: number; since: number | null; symbols: number };
+    .get() as { n: number; since: number | null; symbols: number; flagged: number | null };
   const v = db.prepare('SELECT COUNT(*) AS n FROM pool_volume_history').get() as { n: number };
   return {
     snapshots: Number(s.n),
+    flagged: Number(s.flagged ?? 0),
     volumeWindows: Number(v.n),
     since: s.since === null ? null : Number(s.since),
     symbols: Number(s.symbols),

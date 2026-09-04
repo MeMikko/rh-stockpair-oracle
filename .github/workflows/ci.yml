@@ -1,0 +1,96 @@
+name: CI
+
+# The gate this repository did not have.
+#
+# Until now there was no .github directory at all, so 297 tests, `tsc --noEmit`
+# and every invariant they cover ran nowhere automatically. Every pull request
+# merged today showed "No checks" — the only verification was a human
+# remembering to run them first, which is not a gate, it is a habit.
+#
+# What the tests actually protect is worth naming, because it is not style:
+# that a forged x402 gateway secret cannot buy a call, that `exact` is never
+# advertised without a facilitator that settles it, that a v3 router variant is
+# read rather than guessed, that a missing Chainlink feed stays null and never
+# becomes zero, and that a published drift finding cannot be built on samples
+# the statistic excluded. Each of those is a claim this service makes to
+# strangers, and each has a test that would fail loudly if a change broke it.
+#
+# Every step below passes on master today, so a red run always means "this pull
+# request broke it", never "this check was already broken". Mark it as a
+# required status check on master.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# A new push to a pull request makes the in-flight run obsolete. Never cancel
+# on master: those runs are the record of what actually landed.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22 is a hard floor, not a preference: the service stores everything
+          # in node:sqlite and boots with --env-file-if-exists, and neither
+          # exists on 20. engines.node says >=22 for the same reason.
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # No DB_PATH, no .env, and no RPC reachable. That is the point rather
+      # than an omission: every suite creates its own temporary database, and
+      # any test that quietly needed a live chain or an operator's credentials
+      # would fail here instead of passing on one machine and nowhere else.
+      - name: Test
+        run: npm test
+
+      # High and critical only. A check that goes permanently red on advisories
+      # with no available fix trains people to ignore it, which costs more than
+      # it catches.
+      #
+      # Two different things share one non-zero exit code, and this step's
+      # first run proved why they must not: npmjs.org's audit endpoint
+      # answered 503, npm retried for seven minutes, and the whole run went
+      # red with every test passing. "A high-severity advisory exists" is a
+      # finding about this repository. "npm's audit service was down" is a
+      # fact about npm, and failing a pull request over it is how a check
+      # becomes something people click past.
+      #
+      # So the outcome is classified rather than taken from the exit code: a
+      # real advisory still fails the build, an unreachable endpoint leaves an
+      # annotation and passes. `set +e` because the shell runs with -e and
+      # the whole point here is to inspect a failure rather than inherit it.
+      - name: Audit production dependencies
+        # Bounded, so an outage costs seconds rather than the seven minutes
+        # npm's default retry schedule spent before giving up.
+        timeout-minutes: 3
+        run: |
+          set +e
+          out=$(npm audit --omit=dev --audit-level=high \
+                  --fetch-retries=2 --fetch-retry-maxtimeout=20000 2>&1)
+          code=$?
+          printf '%s\n' "$out"
+          [ $code -eq 0 ] && exit 0
+          if printf '%s' "$out" | grep -qiE 'audit endpoint returned an error|service unavailable|ENOTFOUND|ETIMEDOUT|ECONNRESET|socket hang up'; then
+            echo "::warning title=Audit skipped::npm's audit endpoint was unreachable, so advisories were not checked on this run."
+            exit 0
+          fi
+          exit $code

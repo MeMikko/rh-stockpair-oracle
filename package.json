@@ -35,7 +35,8 @@
     "admin": "node --env-file-if-exists=.env --env-file-if-exists=.env.admin --import tsx scripts/admin.ts",
     "bankr:scope": "node --env-file-if-exists=.env --env-file-if-exists=.env.admin --import tsx scripts/bankr-scope.ts",
     "x402:check": "node --env-file-if-exists=.env --import tsx scripts/x402-check.ts",
-    "sample": "node --env-file-if-exists=.env --import tsx scripts/sample-quotes.ts"
+    "sample": "node --env-file-if-exists=.env --import tsx scripts/sample-quotes.ts",
+    "flag:prices": "node --env-file-if-exists=.env --import tsx scripts/flag-prices.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",

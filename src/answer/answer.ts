@@ -233,7 +233,10 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
         };
       }
       const series = snapshotsForPool(best.poolKey, Date.now() - hours * 3_600_000);
-      const priced = series.filter((r) => r.poolStockUsd !== null);
+      // Flagged samples are left out of the range and the change: a price set
+      // by one order large enough to move the pool 10% would set the high or
+      // the low on its own and describe that order rather than the day.
+      const priced = series.filter((r) => r.poolStockUsd !== null && r.priceFlag === null);
       if (priced.length < 2) {
         return {
           ...base,
@@ -308,13 +311,13 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
           hours,
           openMeanPercent: openPct,
           closedMeanPercent: shutPct,
-          openSamples: open.samples,
-          closedSamples: shut.samples,
+          openSamples: open.usable,
+          closedSamples: shut.usable,
         },
         text:
           `Over ${hours} hours, ${intent.symbol} pools sat ${openPct}% from the Chainlink ` +
           `price on average while the market was open and ${shutPct}% while it was closed ` +
-          `(${open.samples} and ${shut.samples} recorded samples).`,
+          `(${open.usable} and ${shut.usable} usable samples).`,
         reproduce: REPRODUCE.history(intent.symbol, hours),
       };
     }
