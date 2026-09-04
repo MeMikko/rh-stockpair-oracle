@@ -68,6 +68,17 @@ function migrate(db: DatabaseSync): void {
   if (!columns('feeds').has('kind')) {
     db.exec("ALTER TABLE feeds ADD COLUMN kind TEXT NOT NULL DEFAULT 'stock'");
   }
+
+  // Both nullable, and the backfill is deliberately NOT a default. A row
+  // written before these existed has no raw price to recover and has not been
+  // checked; `npm run flag:prices` derives what can still be derived, and the
+  // raw price for those rows stays honestly absent rather than invented.
+  if (!columns('quote_snapshots').has('sqrt_price_x96')) {
+    db.exec('ALTER TABLE quote_snapshots ADD COLUMN sqrt_price_x96 TEXT');
+  }
+  if (!columns('quote_snapshots').has('price_flag')) {
+    db.exec('ALTER TABLE quote_snapshots ADD COLUMN price_flag TEXT');
+  }
 }
 
 export function getCursor(stream: string): number | null {

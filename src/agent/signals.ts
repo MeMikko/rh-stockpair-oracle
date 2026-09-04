@@ -381,7 +381,10 @@ export function detectClosedMarketDrift(
     const open = stats.find((x) => x.session === 'regular');
     const shut = stats.find((x) => x.session === 'closed');
     if (!open?.meanAbsDeviation || !shut?.meanAbsDeviation) continue;
-    if (open.samples < t.minSamples || shut.samples < t.minSamples) continue;
+    // Counted on the samples the mean was actually computed from. Using the
+    // raw sample count would let twelve readings, eleven of them flagged or
+    // feedless, pass a guard that exists to stop exactly that.
+    if (open.usable < t.minSamples || shut.usable < t.minSamples) continue;
     if (shut.meanAbsDeviation < open.meanAbsDeviation * t.minDriftRatio) continue;
 
     const openPercent = round1(open.meanAbsDeviation * 100);
@@ -398,8 +401,8 @@ export function detectClosedMarketDrift(
         windowHours: t.windowHours,
         openMeanPercent: openPercent,
         closedMeanPercent: closedPercent,
-        openSamples: open.samples,
-        closedSamples: shut.samples,
+        openSamples: open.usable,
+        closedSamples: shut.usable,
       },
       reproduce: `GET /history?symbol=${symbol}&hours=${t.windowHours}`,
       detectedAt: now,

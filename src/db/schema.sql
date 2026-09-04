@@ -365,6 +365,15 @@ CREATE TABLE IF NOT EXISTS quote_snapshots (
   block          INTEGER NOT NULL,
   stock_symbol   TEXT,
   spot           TEXT NOT NULL,          -- currency1 per currency0
+  -- The raw Q64.96 price, kept alongside the derived one.
+  -- HoodGrow stored only its derived price and could therefore never recompute
+  -- anything about 60 days of it once the derivation was found wanting. This
+  -- is the exact integer the chain returned; every number above can be
+  -- rebuilt from it, including under a rule that does not exist yet.
+  sqrt_price_x96 TEXT,
+  -- Null means the sample passed the rule, NOT that it was never checked:
+  -- a row written before flagging existed is re-derived by `npm run flag:prices`.
+  price_flag     TEXT,
   implied_usd    TEXT,                   -- paired token in USD, null without a feed
   pool_stock_usd TEXT,                   -- what the POOL implies the stock is worth
   oracle_usd     TEXT,                   -- the stock's Chainlink price, null without a feed
