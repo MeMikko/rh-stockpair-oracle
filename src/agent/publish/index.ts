@@ -1,4 +1,4 @@
-import { markFailed, markPosted, type QueuedPost } from '../queue.js';
+import { claimDelivery, settleDelivery, settlePost, type QueuedPost } from '../queue.js';
 import { farcaster } from './farcaster.js';
 import { x } from './x.js';
 
@@ -7,6 +7,12 @@ export interface PublishResult {
   ref: string | null;
   dryRun: boolean;
   error?: string;
+  /**
+   * Set when the channel was not attempted because a delivery row already
+   * existed. Not an error: it is the ledger refusing to send the same post
+   * twice, which is the whole reason the ledger exists.
+   */
+  alreadyAttempted?: boolean;
 }
 
 export interface Publisher {
@@ -78,16 +84,48 @@ export async function publishPost(post: QueuedPost, live: boolean): Promise<Publ
       results.push({ channel: ch, ref: null, dryRun: true, error: 'unknown channel' });
       continue;
     }
-    results.push(await pub.publish(post.draftText, !live, post.replyTo));
+    if (!live) {
+      // A dry run claims nothing. Writing a ledger row here would burn the
+      // channel for the real send that follows.
+      results.push(await pub.publish(post.draftText, true, post.replyTo));
+      continue;
+    }
+
+    // Claim first. Concurrent runs collapse to one attempt, and a channel that
+    // has been tried before -- including one that errored -- is not tried
+    // again: the error may have been a timeout on a send that arrived.
+    if (!claimDelivery(post.id, ch)) {
+      results.push({
+        channel: ch, ref: null, dryRun: false, alreadyAttempted: true,
+        error: 'already attempted; delete its post_deliveries row to send again',
+      });
+      continue;
+    }
+
+    let result: PublishResult;
+    try {
+      result = await pub.publish(post.draftText, false, post.replyTo);
+    } catch (err) {
+      // A throw is settled like any other failure rather than left claimed.
+      // A row stuck in `claimed` would block the channel forever without ever
+      // saying why.
+      result = { channel: ch, ref: null, dryRun: false, error: (err as Error).message };
+    }
+    settleDelivery(
+      post.id, ch,
+      result.error ? 'failed' : 'sent',
+      { ref: result.ref, error: result.error ?? null },
+    );
+    results.push(result);
   }
 
   if (!live) return { postId: post.id, live, skipped, results, status: 'dry-run' };
 
-  const errors = results.filter((r) => r.error);
-  if (errors.length > 0) {
-    markFailed(post.id, errors.map((e) => `${e.channel}: ${e.error}`).join('; '));
-    return { postId: post.id, live, skipped, results, status: 'failed' };
-  }
-  markPosted(post.id, results.map((r) => `${r.channel}:${r.ref}`).join(','));
-  return { postId: post.id, live, skipped, results, status: 'posted' };
+  // The post's status now comes from the ledger rather than from this run, so
+  // a channel delivered by an earlier run still counts as delivered.
+  const post2 = settlePost(post.id);
+  return {
+    postId: post.id, live, skipped, results,
+    status: post2?.status === 'posted' ? 'posted' : 'failed',
+  };
 }

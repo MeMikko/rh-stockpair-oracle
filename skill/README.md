@@ -59,6 +59,10 @@ advertised as a free service, and the mode has already changed once.
 - **Gas for chain 4663.** `GET /gas`, split into L2 and L1-data components,
   with the launch subsidy reported as an unbroken run of measured samples
   rather than assumed from a date.
+- **The trades, not just the totals.** `GET /trades?symbol=` returns the
+  largest recorded trades — side, size, USD where a feed exists, pool and
+  block. Captured every 6 hours alongside the volume window, so it is what was
+  recorded rather than what is happening now.
 - **What it recorded, not just what it reads.** `GET /history?symbol=&hours=`
   returns the price series for a stock's busiest pool and the drift against
   Chainlink split by market session. Nobody can reconstruct this from the

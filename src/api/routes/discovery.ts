@@ -55,6 +55,10 @@ export function serviceDescriptor(): Record<string, unknown> {
       'POST /prepare-swap':
         'unsigned calldata with a min-out from the quoter: UniversalRouter for a v4 pool, ' +
         'SwapRouter for a v3 pool. Single-hop only; v3 requires an explicit recipient',
+      'GET /trades?symbol=&limit=':
+        'the largest recorded trades in a stock: side, stock-side notional, USD where a ' +
+        'Chainlink feed exists, and the pool and block. Captured while the 24h volume window ' +
+        'is measured every 6h, so it is what was recorded rather than what is happening now',
       'GET /history?symbol=&hours=':
         'what this service recorded, rather than what it reads now: the price series for a ' +
         "stock's busiest pool and the drift against Chainlink split by market session. " +

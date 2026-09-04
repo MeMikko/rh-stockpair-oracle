@@ -24,7 +24,7 @@ import {
   walletMe,
   type DeployRequest,
 } from '../bankr/client.js';
-import { decide, enqueue, getPost, listPosts } from '../agent/queue.js';
+import { decide, deliveriesFor, enqueue, getPost, listPosts } from '../agent/queue.js';
 import { fetchLlmSpend } from '../llm/spend.js';
 import { publishPost } from '../agent/publish/index.js';
 import { MAX_POST_LENGTH, verifyDraft } from '../agent/verify.js';
@@ -394,10 +394,14 @@ export function buildAdminServer(): FastifyInstance {
     const live = (req.body as { confirm?: string } | undefined)?.confirm === 'SEND';
     try {
       const outcome = await publishPost(post, live);
+      // The per-channel record, returned alongside the run's own result: a
+      // post can be public on one channel and missing from another, and the
+      // operator is the person who has to see that.
+      const withLedger = { ...outcome, deliveries: deliveriesFor(id) };
       if (outcome.status === 'skipped') {
         req.log.warn(`publish ${id} skipped: no credentials for ${outcome.skipped.join(', ')}`);
         return {
-          ...outcome,
+          ...withLedger,
           note: 'still approved — configure the channel and try again; nothing was sent',
         };
       }

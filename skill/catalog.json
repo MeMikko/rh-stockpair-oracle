@@ -21,6 +21,7 @@
     "GET /price?symbol=TSLA — the stock's own Chainlink price; 404 with a reason where no feed exists",
     "GET /pools?symbol=NVDA — counts split by protocol PLUS the top 25 pool identifiers to quote, ordered by measured 24h swaps. GET /volume — 24h volume with measuredSecondsAgo",
     "GET /quote?pool=&size= — implied USD, depth, price impact, Chainlink deviation, market hours. Takes a v4 poolId OR a v3 pool address; the response says which in `protocol`",
+    "GET /trades?symbol=&limit= — the largest recorded trades for a stock (side, size, USD, pool, block). Captured every 6h alongside the volume window, so it is what was recorded, not live. usd is null where the stock has no Chainlink feed",
     "GET /history?symbol=&hours= — the recorded price series for a stock's busiest pool, and the drift vs Chainlink split by market session (open/closed/pre/post). Cannot be rebuilt from the chain: the public RPC has no archive. Covers only what has been sampled; GET /health reports the depth free, so check before paying",
     "A short series is short: /history returns `samples`, gaps stay gaps, and nothing is interpolated. driftBySession counts feedless samples as `unknowable` rather than dropping them",
     "deviation: null is normal — 159 of 194 stock tokens have no feed. Read deviationReason; never treat null as zero",

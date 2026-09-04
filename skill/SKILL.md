@@ -249,6 +249,18 @@ need none and never will. `x-oracle-pricing` tells you the mode you are in on
 every response — read it rather than assuming, including assuming this
 paragraph is still current.
 
+## The trades, not just the totals
+
+`GET /trades?symbol=NVDA` returns the largest recorded trades: side, stock-side
+notional, USD where a Chainlink feed exists, and the pool and block. `/volume`
+says a pool traded $160M in a day; this says which trades made it up, which is
+the question a thin market actually raises.
+
+Captured while the 24h volume window is measured, every 6 hours — so it is what
+was recorded, not what is happening now, and `measurement.measuredAt` says how
+stale the newest row is. `usd: null` means the stock has no feed, never that
+the trade was worthless. `side` is the stock's: `buy` means stock left the pool.
+
 ## What it recorded, not just what it reads
 
 `GET /history?symbol=NVDA&hours=168` returns the price series for that stock's

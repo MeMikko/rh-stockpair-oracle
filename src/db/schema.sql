@@ -386,3 +386,55 @@ CREATE TABLE IF NOT EXISTS quote_snapshots (
 );
 CREATE INDEX IF NOT EXISTS quote_snapshots_symbol_time ON quote_snapshots(stock_symbol, at);
 CREATE INDEX IF NOT EXISTS quote_snapshots_time ON quote_snapshots(at);
+
+-- One row per (post, channel), written BEFORE the send is attempted.
+--
+-- A post used to carry a single status for every channel it went to, so a run
+-- where Farcaster succeeded and X failed marked the whole post `failed` --
+-- while the claim was live on Farcaster. The record was then wrong about what
+-- the agent had said in public, and a retry would have posted it there twice.
+--
+-- The row is claimed first and settled after. The primary key is what makes
+-- that work: two concurrent runs collapse to one attempt, ever. A `failed` row
+-- is never retried, because a send that timed out may still have been
+-- delivered -- a duplicate is worse than a gap, the same posture the x402
+-- payment paths take about non-idempotent calls.
+CREATE TABLE IF NOT EXISTS post_deliveries (
+  post_id      TEXT NOT NULL,
+  channel      TEXT NOT NULL,
+  status       TEXT NOT NULL,          -- claimed | sent | failed
+  ref          TEXT,                   -- platform id of the published message
+  error        TEXT,
+  claimed_at   INTEGER NOT NULL,
+  settled_at   INTEGER,
+  PRIMARY KEY (post_id, channel)
+);
+CREATE INDEX IF NOT EXISTS post_deliveries_post ON post_deliveries(post_id);
+
+-- The trades worth noticing, kept instead of folded away.
+--
+-- Every swap already passes through the volume measurement, which adds it to a
+-- per-pool total and drops it. So the service could say what a pool traded in
+-- a day and nothing about the trade that moved it. This costs no extra RPC
+-- call: the logs are already in hand.
+--
+-- (tx_hash, log_index) is the swap's identity on chain, so a window measured
+-- twice records it once. `usd` is null where the stock has no Chainlink feed —
+-- kept with its reason rather than dropped, because a table that silently held
+-- only the 35 stocks with feeds would read as though it covered all 194.
+CREATE TABLE IF NOT EXISTS large_swaps (
+  tx_hash      TEXT NOT NULL,
+  log_index    INTEGER NOT NULL,
+  pool_key     TEXT NOT NULL,
+  protocol     TEXT NOT NULL,          -- v4 | v3
+  block        INTEGER NOT NULL,
+  stock_symbol TEXT NOT NULL,
+  side         TEXT NOT NULL,          -- buy | sell, of the stock
+  stock_units  TEXT NOT NULL,          -- stock-side notional in whole tokens
+  usd          TEXT,                   -- null without a feed, never a guess
+  usd_reason   TEXT,
+  observed_at  INTEGER NOT NULL,
+  PRIMARY KEY (tx_hash, log_index)
+);
+CREATE INDEX IF NOT EXISTS large_swaps_symbol ON large_swaps(stock_symbol, block DESC);
+CREATE INDEX IF NOT EXISTS large_swaps_block ON large_swaps(block DESC);

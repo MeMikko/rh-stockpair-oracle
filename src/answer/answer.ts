@@ -9,6 +9,7 @@ import { marketStatus } from '../pricing/marketHours.js';
 import { verifyDraft } from '../agent/verify.js';
 import { REPRODUCE } from '../api/routes/data.js';
 import { bestSampledPool, driftBySession, historyDepth, snapshotsForPool } from '../history/series.js';
+import { largeSwapsFor, largestSwaps } from '../volume/largeSwaps.js';
 import { aboutFacts, conversationalAnswer, conversationalConfig } from './conversational.js';
 import type { Tier } from '../entitlements/index.js';
 
@@ -50,7 +51,8 @@ const round2 = (n: number) => Number(n.toFixed(2));
 const NO_IDEA =
   'I only answer from indexed Robinhood Chain data: stock prices from Chainlink, pool ' +
   'counts, upcoming corporate actions, feed coverage, gas, the v3/v4 volume split, and ' +
-  'what I have recorded over time — including how far pools drift while the market is shut. ' +
+  'what I have recorded over time — including how far pools drift while the market is shut, ' +
+  'and the largest trades I have seen. ' +
   'Name a ticker or a pool id.';
 
 function poolCounts(symbol: string): { v4: number; v3: number; total: number } {
@@ -319,6 +321,50 @@ async function build(intent: Intent, now = new Date()): Promise<Answer> {
           `price on average while the market was open and ${shutPct}% while it was closed ` +
           `(${open.usable} and ${shut.usable} usable samples).`,
         reproduce: REPRODUCE.history(intent.symbol, hours),
+      };
+    }
+
+    /**
+     * The trade, not the total.
+     *
+     * Answers from what the volume job recorded rather than from a live read,
+     * so the text says nothing about the last ten minutes. That limit is in
+     * the answer rather than in a footnote: a caller who thinks this is live
+     * would read an absence as calm.
+     */
+    case 'large_trades': {
+      const rows = intent.symbol ? largeSwapsFor(intent.symbol, 1) : largestSwaps(1);
+      const top = rows[0];
+      if (!top || top.usd === null) {
+        return {
+          ...base,
+          facts: { symbol: intent.symbol, recorded: rows.length },
+          text: intent.symbol
+            ? `I have no priced trade recorded for ${intent.symbol}. Trades are captured when the ` +
+              '24h volume window is measured, every 6 hours, and a stock with no Chainlink feed ' +
+              'is recorded without a USD figure rather than with a guessed one.'
+            : 'I have no priced trades recorded yet. They are captured every 6 hours, alongside ' +
+              'the volume measurement.',
+          reproduce: REPRODUCE.trades(intent.symbol ?? 'NVDA'),
+          answered: false,
+        };
+      }
+      const usd = Math.round(top.usd);
+      const units = round2(top.stockUnits);
+      return {
+        ...base,
+        facts: {
+          symbol: top.stockSymbol,
+          usd,
+          stockUnits: units,
+          side: top.side,
+          protocol: top.protocol,
+          block: top.block,
+        },
+        text:
+          `The largest recorded ${top.stockSymbol} trade is a ${top.side} of ${units} tokens, ` +
+          `about ${usd} USD, in a ${top.protocol} pool at block ${top.block}.`,
+        reproduce: REPRODUCE.trades(top.stockSymbol),
       };
     }
 

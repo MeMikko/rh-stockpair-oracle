@@ -25,6 +25,7 @@ export type IntentKind =
   | 'quote'
   | 'history'
   | 'market_drift'
+  | 'large_trades'
   | 'unknown';
 
 export interface Intent {
@@ -66,6 +67,18 @@ const RULES: Array<{ kind: IntentKind; any: RegExp[]; requires?: (i: Partial<Int
       /\b(while|when|whilst)\b.{0,20}\b(closed|shut|open)\b/i,
       /\bdrifts?\b/i,
       /\bweekend\b/i,
+    ],
+  },
+  // Before history and before price. "What was the biggest NVDA trade" is a
+  // past-tense question about a price-shaped thing, so both of those rules
+  // would take it and answer something else.
+  {
+    kind: 'large_trades',
+    any: [
+      /\b(whale|whales)\b/i,
+      /\b(biggest|largest|big(gest)?)\b.{0,20}\b(trade|trades|swap|swaps|buy|sell|order)\b/i,
+      /\b(trade|trades|swap|swaps)\b.{0,20}\b(today|recent|lately|big)\b/i,
+      /\bany (big|large|notable)\b/i,
     ],
   },
   // Then history, before price: "what was NVDA" and "what is NVDA" differ by

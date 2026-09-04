@@ -217,6 +217,7 @@ export const REPRODUCE = {
   corporateActions: (days = 30) => `GET /corporate-actions?withinDays=${days}`,
   quote: (poolRef: string) => `GET /quote?pool=${poolRef}`,
   health: () => 'GET /health',
+  trades: (symbol: string) => `GET /trades?symbol=${symbol}`,
   history: (symbol: string, hours: number) =>
     `GET /history?symbol=${symbol}&hours=${hours}`,
 } as const;

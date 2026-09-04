@@ -5,15 +5,22 @@ import { V4_SWAP_EVENT, V3_SWAP_EVENT } from '../abi.js';
 import { getDb } from '../db/index.js';
 import { walkLogs } from '../indexer/logWalker.js';
 import { withRetry } from '../util/retry.js';
+import type { TopSwaps } from './largeSwaps.js';
 
 /**
  * Swap-volume measurement over a bounded window.
  *
- * Individual swaps are deliberately not stored. The chain produces far more of
- * them than a v1 cache should hold and no endpoint answers a per-swap
- * question, so each range is folded into a per-pool accumulator and only the
- * totals are persisted -- always alongside the block and timestamp window they
- * were measured over, because an undated volume number is not reproducible.
+ * Most individual swaps are still not stored: the chain produces far more of
+ * them than this cache should hold, so each range is folded into a per-pool
+ * accumulator and the totals are persisted alongside the block and timestamp
+ * window they were measured over, because an undated volume number is not
+ * reproducible.
+ *
+ * The exception is the largest few per stock-paired pool, offered to an
+ * optional collector as the logs go past (see volume/largeSwaps.ts). Folding
+ * every swap into a sum meant the service could say what a pool traded in a
+ * day and nothing about the trade that moved it -- and the logs needed to
+ * answer that were already being read and discarded.
  *
  * v4 and v3 need different reads. Every v4 swap on the chain passes through
  * the PoolManager singleton and carries its PoolId as topic1, so one address
@@ -80,10 +87,14 @@ export async function recentWindow(seconds: number): Promise<VolumeWindow> {
 export async function measureV4Volume(
   win: VolumeWindow,
   onProgress?: (done: number, pools: number) => void,
+  collector?: TopSwaps,
 ): Promise<Map<string, VolumeAccumulator>> {
   const acc = new Map<string, VolumeAccumulator>();
 
-  await walkLogs<{ id: Hex; amount0: bigint; amount1: bigint }>({
+  await walkLogs<{
+    id: Hex; amount0: bigint; amount1: bigint;
+    block: bigint; txHash: string; logIndex: number;
+  }>({
     stream: 'v4:swaps:window',
     fromBlock: win.fromBlock,
     toBlock: win.toBlock,
@@ -100,6 +111,9 @@ export async function measureV4Volume(
         id: l.args.id!,
         amount0: l.args.amount0!,
         amount1: l.args.amount1!,
+        block: l.blockNumber ?? 0n,
+        txHash: l.transactionHash ?? '',
+        logIndex: l.logIndex ?? 0,
       }));
     },
     save: (rows) => {
@@ -110,6 +124,10 @@ export async function measureV4Volume(
         cur.abs0 += abs(r.amount0);
         cur.abs1 += abs(r.amount1);
         acc.set(k, cur);
+        collector?.offer({
+          poolKey: k, protocol: 'v4', txHash: r.txHash, logIndex: r.logIndex,
+          block: Number(r.block), amount0: r.amount0, amount1: r.amount1,
+        });
       }
     },
     onProgress: (p) => onProgress?.(p.done, acc.size),
@@ -130,6 +148,7 @@ export async function measureV3Volume(
   win: VolumeWindow,
   poolAddresses: string[],
   onProgress?: (done: number, pools: number) => void,
+  collector?: TopSwaps,
 ): Promise<Map<string, VolumeAccumulator>> {
   const acc = new Map<string, VolumeAccumulator>();
   if (poolAddresses.length === 0) return acc;
@@ -137,7 +156,10 @@ export async function measureV3Volume(
   const known = new Set(poolAddresses.map((a) => a.toLowerCase()));
   const useAddressFilter = poolAddresses.length <= 400;
 
-  await walkLogs<{ pool: string; amount0: bigint; amount1: bigint }>({
+  await walkLogs<{
+    pool: string; amount0: bigint; amount1: bigint;
+    block: bigint; txHash: string; logIndex: number;
+  }>({
     stream: 'v3:swaps:window',
     fromBlock: win.fromBlock,
     toBlock: win.toBlock,
@@ -169,6 +191,9 @@ export async function measureV3Volume(
           pool: l.address.toLowerCase(),
           amount0: l.args.amount0!,
           amount1: l.args.amount1!,
+          block: l.blockNumber ?? 0n,
+          txHash: l.transactionHash ?? '',
+          logIndex: l.logIndex ?? 0,
         }));
     },
     save: (rows) => {
@@ -178,6 +203,10 @@ export async function measureV3Volume(
         cur.abs0 += abs(r.amount0);
         cur.abs1 += abs(r.amount1);
         acc.set(r.pool, cur);
+        collector?.offer({
+          poolKey: r.pool, protocol: 'v3', txHash: r.txHash, logIndex: r.logIndex,
+          block: Number(r.block), amount0: r.amount0, amount1: r.amount1,
+        });
       }
     },
     onProgress: (p) => onProgress?.(p.done, acc.size),
