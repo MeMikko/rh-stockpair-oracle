@@ -38,6 +38,9 @@ than earn margin; see `config/pricing.ts`.
    - `GET /corporate-actions` – the published calendar joined to the indexed
      pool set. Both halves are public; nothing else joins them.
    - `GET /coverage` – which stock tokens have a Chainlink feed.
+   - `GET /trades` – the largest recorded trades per stock. Costs no extra RPC
+     call: the volume measurement already reads every Swap log and used to fold
+     them into a sum and drop them.
    - `GET /history` – what was recorded, not what is read now: the price
      series for a stock's busiest pool and the drift against Chainlink split
      by market session. The only endpoint here a competitor cannot match by

@@ -33,6 +33,65 @@ const row2post = (r: Record<string, unknown>): QueuedPost => ({
   replyTo: r.reply_to ? String(r.reply_to) : null,
 });
 
+export type DeliveryStatus = 'claimed' | 'sent' | 'failed';
+
+export interface Delivery {
+  channel: string;
+  status: DeliveryStatus;
+  ref: string | null;
+  error: string | null;
+  claimedAt: number;
+  settledAt: number | null;
+}
+
+/**
+ * Take the right to attempt one channel, or refuse.
+ *
+ * Returns false when a row already exists in ANY state, including `failed`.
+ * That is the point rather than an oversight: a send that errored may still
+ * have been delivered — a timeout says nothing about what the far side did —
+ * and a duplicate post is worse than a missing one. Re-sending is an operator
+ * decision made by deleting the row, not something a re-run does by itself.
+ */
+export function claimDelivery(postId: string, channel: string): boolean {
+  const r = getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO post_deliveries (post_id, channel, status, claimed_at)
+       VALUES (?, ?, 'claimed', ?)`,
+    )
+    .run(postId, channel, Date.now());
+  return Number(r.changes) > 0;
+}
+
+export function settleDelivery(
+  postId: string,
+  channel: string,
+  status: 'sent' | 'failed',
+  detail: { ref?: string | null; error?: string | null },
+): void {
+  getDb()
+    .prepare(
+      `UPDATE post_deliveries SET status = ?, ref = ?, error = ?, settled_at = ?
+       WHERE post_id = ? AND channel = ?`,
+    )
+    .run(status, detail.ref ?? null, detail.error?.slice(0, 500) ?? null, Date.now(), postId, channel);
+}
+
+export function deliveriesFor(postId: string): Delivery[] {
+  return (
+    getDb()
+      .prepare('SELECT * FROM post_deliveries WHERE post_id = ? ORDER BY channel')
+      .all(postId) as Array<Record<string, unknown>>
+  ).map((r) => ({
+    channel: String(r.channel),
+    status: String(r.status) as DeliveryStatus,
+    ref: r.ref ? String(r.ref) : null,
+    error: r.error ? String(r.error) : null,
+    claimedAt: Number(r.claimed_at),
+    settledAt: r.settled_at ? Number(r.settled_at) : null,
+  }));
+}
+
 /** Queue a draft. One post per signal: re-scanning never duplicates. */
 export function enqueue(
   signalId: string,
@@ -89,4 +148,35 @@ export function markPosted(id: string, refs: string): void {
 
 export function markFailed(id: string, error: string): void {
   getDb().prepare("UPDATE posts SET status = 'failed', error = ? WHERE id = ?").run(error.slice(0, 500), id);
+}
+
+/**
+ * Set the post's status from what actually reached a channel.
+ *
+ * `posted` the moment ONE channel carried it, because at that point the claim
+ * is public and calling the post failed would be a false record of what the
+ * agent has said. Any channel that failed is still recorded — in `error` on a
+ * posted row, and per channel in post_deliveries — so an operator sees the
+ * gap without the post lying about the part that worked.
+ */
+export function settlePost(id: string): QueuedPost | null {
+  const deliveries = deliveriesFor(id);
+  const sent = deliveries.filter((d) => d.status === 'sent');
+  const failed = deliveries.filter((d) => d.status === 'failed');
+  if (sent.length === 0 && failed.length === 0) return getPost(id);
+
+  const errors = failed.map((d) => `${d.channel}: ${d.error ?? 'failed'}`).join('; ');
+  if (sent.length > 0) {
+    getDb()
+      .prepare("UPDATE posts SET status = 'posted', posted_at = ?, post_refs = ?, error = ? WHERE id = ?")
+      .run(
+        Date.now(),
+        sent.map((d) => `${d.channel}:${d.ref}`).join(','),
+        errors || null,
+        id,
+      );
+  } else {
+    markFailed(id, errors);
+  }
+  return getPost(id);
 }

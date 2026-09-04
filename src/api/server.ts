@@ -11,6 +11,7 @@ import { registerAuth } from './routes/auth.js';
 import { registerPro } from './routes/pro.js';
 import { registerData } from './routes/data.js';
 import { registerHistory } from './routes/history.js';
+import { registerTrades } from './routes/trades.js';
 import { historyDepth } from '../history/series.js';
 import { registerDiscovery } from './routes/discovery.js';
 import { registerX402 } from './x402.js';
@@ -131,6 +132,7 @@ export function buildServer() {
 
   registerQuote(app);
   registerHistory(app);
+  registerTrades(app);
   registerGas(app);
   registerPrepareSwap(app);
   registerCorporateActions(app);

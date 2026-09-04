@@ -7,6 +7,9 @@ import {
   saveVolume,
 } from '../src/volume/swaps.js';
 import { buildVolumeReport, feedCoverage } from '../src/volume/usd.js';
+import {
+  TopSwaps, poolFacts, saveLargeSwaps, selectLargeSwaps,
+} from '../src/volume/largeSwaps.js';
 
 /**
  * Measure stock-paired swap volume over a recent window and compare it with
@@ -39,6 +42,21 @@ console.log(
     `${spanHours.toFixed(2)}h actual)\n`,
 );
 
+/**
+ * Floor for recording an individual trade, in USD.
+ *
+ * Well above "any trade" on purpose: a threshold that admits everything makes
+ * "notable" mean nothing, and this table exists to answer what stood out.
+ */
+const minLargeUsd = Number(arg('min-usd') ?? process.env.LARGE_SWAP_MIN_USD ?? 5000);
+
+// Built before the walk so the collector can rank on the stock side, and so a
+// pool that is not stock-paired is never even offered.
+const facts = poolFacts();
+const collector = new TopSwaps(
+  new Map([...facts].map(([k, f]) => [k, f.stockSide])),
+);
+
 const started = Date.now();
 let lastLog = 0;
 const tick = (label: string) => (done: number, pools: number) => {
@@ -49,7 +67,7 @@ const tick = (label: string) => (done: number, pools: number) => {
 };
 
 if (only !== 'v3') {
-  const v4 = await measureV4Volume(win, tick('v4'));
+  const v4 = await measureV4Volume(win, tick('v4'), collector);
   saveVolume('v4', win, v4);
   console.log(`  v4: ${v4.size} pools traded`);
 }
@@ -58,7 +76,7 @@ if (only !== 'v4') {
   const v3Pools = (
     getDb().prepare('SELECT address FROM pools_v3').all() as unknown as Array<{ address: string }>
   ).map((r) => r.address);
-  const v3 = await measureV3Volume(win, v3Pools, tick('v3'));
+  const v3 = await measureV3Volume(win, v3Pools, tick('v3'), collector);
   saveVolume('v3', win, v3);
   console.log(`  v3: ${v3.size} of ${v3Pools.length} known pools traded`);
 }
@@ -66,6 +84,23 @@ console.log(`  measured in ${((Date.now() - started) / 60_000).toFixed(1)}m\n`);
 
 const rep = await buildVolumeReport();
 const cov = feedCoverage();
+
+// Priced from the same Chainlink reads the report just made, so a trade's USD
+// figure and the pool's USD volume can never disagree about the same stock.
+const priceBySymbol = new Map(
+  rep.pools.filter((p) => p.priceUsd !== null).map((p) => [p.stockSymbol, p.priceUsd!]),
+);
+const large = selectLargeSwaps(collector.all(), facts, priceBySymbol, minLargeUsd);
+const insertedLarge = saveLargeSwaps(large);
+console.log(
+  `large trades      ${insertedLarge} new of ${large.length} at or above ` +
+    `$${minLargeUsd.toLocaleString('en-US')} (${collector.size()} candidates ranked)`,
+);
+const unpriceable = large.filter((l) => l.usd === null).length;
+if (unpriceable > 0) {
+  console.log(`                  ${unpriceable} kept unpriced: the stock has no Chainlink feed`);
+}
+
 const perDay = rep.hours > 0 ? (rep.totalUsd / rep.hours) * 24 : 0;
 
 const usd = (n: number) =>
