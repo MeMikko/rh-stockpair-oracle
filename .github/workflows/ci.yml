@@ -65,5 +65,32 @@ jobs:
       # High and critical only. A check that goes permanently red on advisories
       # with no available fix trains people to ignore it, which costs more than
       # it catches.
+      #
+      # Two different things share one non-zero exit code, and this step's
+      # first run proved why they must not: npmjs.org's audit endpoint
+      # answered 503, npm retried for seven minutes, and the whole run went
+      # red with every test passing. "A high-severity advisory exists" is a
+      # finding about this repository. "npm's audit service was down" is a
+      # fact about npm, and failing a pull request over it is how a check
+      # becomes something people click past.
+      #
+      # So the outcome is classified rather than taken from the exit code: a
+      # real advisory still fails the build, an unreachable endpoint leaves an
+      # annotation and passes. `set +e` because the shell runs with -e and
+      # the whole point here is to inspect a failure rather than inherit it.
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+        # Bounded, so an outage costs seconds rather than the seven minutes
+        # npm's default retry schedule spent before giving up.
+        timeout-minutes: 3
+        run: |
+          set +e
+          out=$(npm audit --omit=dev --audit-level=high \
+                  --fetch-retries=2 --fetch-retry-maxtimeout=20000 2>&1)
+          code=$?
+          printf '%s\n' "$out"
+          [ $code -eq 0 ] && exit 0
+          if printf '%s' "$out" | grep -qiE 'audit endpoint returned an error|service unavailable|ENOTFOUND|ETIMEDOUT|ECONNRESET|socket hang up'; then
+            echo "::warning title=Audit skipped::npm's audit endpoint was unreachable, so advisories were not checked on this run."
+            exit 0
+          fi
+          exit $code
