@@ -10,6 +10,10 @@ import {
   verifyAdminSignIn,
 } from './auth.js';
 import { adminPage } from './page.js';
+import {
+  adminExposure, adminExposureConfig, remoteReadiness, secureCookie, sessionTtlMs, signInError,
+} from './exposure.js';
+import { checkLimit } from './rateLimit.js';
 import { adminKeyConfigured, bankr } from '../../config/bankr.js';
 import {
   BankrError,
@@ -61,20 +65,33 @@ const COOKIE = 'oracle_admin';
 
 export const adminEnv = {
   port: Number(process.env.ADMIN_PORT ?? 8090),
-  host: process.env.ADMIN_HOST?.trim() || '127.0.0.1',
+  host: adminExposureConfig.host,
   /**
-   * Binding to anything but loopback is possible and deliberately awkward.
-   * The panel is not hardened for the open internet — its whole security story
-   * is that it is not reachable from it.
+   * Binding to anything but loopback is deliberately awkward, and turning it
+   * on changes the panel's behaviour rather than merely its address: see
+   * admin/exposure.ts. Loopback remains the default.
    */
-  allowRemote: process.env.ADMIN_ALLOW_REMOTE === '1',
+  allowRemote: adminExposureConfig.allowRemote,
   /**
-   * Cookies are not marked Secure by default: over an SSH tunnel the panel is
-   * plain http on localhost, and a Secure cookie would simply never be sent,
-   * which looks like a broken login rather than a security setting.
+   * On loopback over an SSH tunnel the panel is plain http, where a Secure
+   * cookie would simply never be sent — a broken login that looks like a
+   * security setting. Published, it is forced on regardless.
    */
-  secureCookie: process.env.ADMIN_SECURE_COOKIE === '1',
+  secureCookie: secureCookie(),
 };
+
+/**
+ * How hard the doors that must stay open are allowed to be knocked on.
+ *
+ * `/admin/nonce` and `/admin/verify` cannot sit behind the session gate: they
+ * are how a session is obtained. Published, they are the only routes an
+ * unauthenticated caller can reach, so they are the ones that need a bound.
+ * Verification is the tighter of the two because it costs a signature check.
+ */
+const SIGNIN_LIMITS = {
+  '/admin/nonce': { events: 30, windowMs: 60_000 },
+  '/admin/verify': { events: 10, windowMs: 60_000 },
+} as const;
 
 function tokenFrom(req: FastifyRequest): string | undefined {
   const auth = req.headers.authorization;
@@ -102,21 +119,48 @@ function sendBankrError(reply: FastifyReply, err: unknown): FastifyReply {
 export function buildAdminServer(): FastifyInstance {
   const configured = adminConfigured();
   if (!configured.ok) throw new Error(`admin panel is not configured: ${configured.error}`);
-  if (adminEnv.host !== '127.0.0.1' && adminEnv.host !== 'localhost' && !adminEnv.allowRemote) {
-    throw new Error(
-      `refusing to bind the admin panel to ${adminEnv.host}. Set ADMIN_ALLOW_REMOTE=1 only if ` +
-        'something else — a VPN, a firewall — is keeping it off the public internet.',
-    );
-  }
+  // Everything exposure adds is checked at boot, so a misconfiguration is a
+  // process that will not start rather than a panel quietly serving a wallet
+  // to whoever finds the hostname.
+  const exposure = remoteReadiness();
+  if (!exposure.ok) throw new Error(exposure.error);
 
-  const app = Fastify({ logger: true });
+  // Client addresses come from the proxy's X-Forwarded-For only when the panel
+  // is behind one. On loopback the header is whatever the caller typed, and
+  // trusting it there would let anyone reset their own rate-limit bucket by
+  // inventing an address.
+  const app = Fastify({ logger: true, trustProxy: adminExposure() === 'remote' });
 
   app.addHook('onSend', async (_req, reply, payload) => {
     // Nothing here is cacheable and nothing here should ever be framed.
     reply.header('cache-control', 'no-store');
     reply.header('x-frame-options', 'DENY');
     reply.header('referrer-policy', 'no-referrer');
+    if (adminExposure() === 'remote') {
+      // Only meaningful over TLS, and only correct once the panel is actually
+      // published: sent on loopback it would pin a browser to https for
+      // localhost and break every other local service on the same host.
+      reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
+    }
     return payload;
+  });
+
+  /**
+   * The bound on sign-in, before the gate below.
+   *
+   * Registered as its own hook rather than inside the gate because the routes
+   * it protects are exactly the ones the gate lets through.
+   */
+  app.addHook('onRequest', async (req, reply) => {
+    const url = req.routeOptions?.url ?? '';
+    const limit = SIGNIN_LIMITS[url as keyof typeof SIGNIN_LIMITS];
+    if (!limit) return;
+    const verdict = checkLimit(`${url}:${req.ip}`, limit);
+    if (!verdict.ok) {
+      req.log.warn(`admin sign-in rate limit hit on ${url} from ${req.ip}`);
+      reply.header('retry-after', String(verdict.retryAfterSeconds));
+      return reply.code(429).send({ error: 'too many sign-in attempts; try again shortly' });
+    }
   });
 
   /**
@@ -157,12 +201,25 @@ export function buildAdminServer(): FastifyInstance {
     return adminPage();
   });
 
-  app.get('/admin/health', async () => ({
-    ok: true,
-    owners: adminConfig.owners.length,
-    adminKey: adminKeyConfigured(),
-    apiBaseUrl: bankr.apiBaseUrl,
-  }));
+  /**
+   * Liveness, and nothing more than that when anyone can ask.
+   *
+   * This route is open because a signed-out browser loads it first. On
+   * loopback the extra fields save a round trip when something is
+   * misconfigured; published, "how many owners are there and is a
+   * wallet-capable key loaded" is reconnaissance, freely available to anyone
+   * who finds the hostname. The same facts are on /admin/me for a session
+   * that has proved who it is.
+   */
+  app.get('/admin/health', async () => {
+    if (adminExposure() === 'remote') return { ok: true };
+    return {
+      ok: true,
+      owners: adminConfig.owners.length,
+      adminKey: adminKeyConfigured(),
+      apiBaseUrl: bankr.apiBaseUrl,
+    };
+  });
 
   app.get('/admin/nonce', async (req) => {
     const raw = (req.query as { address?: string } | undefined)?.address?.trim();
@@ -187,14 +244,16 @@ export function buildAdminServer(): FastifyInstance {
     }
     const res = await verifyAdminSignIn(b as { address: string; signature: string; nonce: string });
     if (!res.ok) {
+      // The specific reason goes to the log, which only the operator reads.
+      // What crosses the wire depends on who can reach the wire.
       req.log.warn(`admin sign-in rejected: ${res.error}`);
-      return reply.code(401).send({ error: res.error });
+      return reply.code(401).send({ error: signInError(res.error) });
     }
     reply.header(
       'set-cookie',
       `${COOKIE}=${res.token}; Path=/; HttpOnly; SameSite=Strict; ${
-        adminEnv.secureCookie ? 'Secure; ' : ''
-      }Max-Age=${12 * 3600}`,
+        secureCookie() ? 'Secure; ' : ''
+      }Max-Age=${Math.floor(sessionTtlMs() / 1000)}`,
     );
     req.log.info(`admin session issued to ${res.address}`);
     return { ok: true, address: res.address };
@@ -207,10 +266,14 @@ export function buildAdminServer(): FastifyInstance {
 
   app.get('/admin/me', async (req) => {
     const session = readAdminSession(tokenFrom(req));
+    // Whether a wallet-capable key is loaded is answered only to someone who
+    // has proved they are an owner. A signed-out caller learns that they are
+    // signed out, which they already knew.
+    if (!session) return { signedIn: false, address: null, owner: false, adminKey: null };
     return {
-      signedIn: session !== null,
-      address: session?.subject ?? null,
-      owner: isOwner(session?.subject ?? null),
+      signedIn: true,
+      address: session.subject,
+      owner: isOwner(session.subject),
       adminKey: adminKeyConfigured(),
     };
   });

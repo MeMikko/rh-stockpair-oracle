@@ -422,6 +422,76 @@ different secret from the public site, so neither a public session nor a
 signature captured there is worth anything here. An empty allowlist means the
 panel refuses to start.
 
+### Publishing the panel at a hostname
+
+An ssh tunnel is a poor fit for the panel's daily job, which is approving a
+post from wherever you happen to be. The panel can be put behind
+`admin.sb4s.xyz` instead — and doing so removes the first of those two gates,
+so the second has to carry weight it was not carrying before.
+
+Setting `ADMIN_ALLOW_REMOTE=1` is what turns that on, and it changes the
+panel's behaviour rather than only its address:
+
+| | loopback | published |
+|---|---|---|
+| session cookie | `Secure` optional (the tunnel is http) | `Secure` forced |
+| session lifetime | 12h | 2h |
+| failed sign-in says | which address is not an owner | `sign-in failed` |
+| `/admin/nonce`, `/admin/verify` | unbounded | 30/min and 10/min per client |
+| `/admin/health` unauthenticated | owners, key presence, API base | `{ok:true}` |
+| `ADMIN_AUTH_SECRET` floor | 16 chars | 32 chars |
+| HSTS | no | yes |
+
+Each of those existed as it did *because* the panel was unreachable; the
+comments that justified them said so. Binding outward without the flag is a
+refusal to start rather than a warning, because the flag is what turns them on.
+
+```bash
+# 1. the panel, on an address only Caddy can reach — never 0.0.0.0
+docker inspect <caddy-container> \
+  --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}'   # e.g. 172.18.0.1
+
+# in /opt/rh-oracle/.env.admin (chmod 600), NOT in the unit file:
+#   ADMIN_HOST=172.18.0.1
+#   ADMIN_ALLOW_REMOTE=1
+#   ADMIN_AUTH_SECRET=<32+ chars — npm run secrets -- --admin>
+
+# 2. a DNS A record for admin.sb4s.xyz pointing at this box
+
+# 3. the site block
+cat ops/rh-oracle-admin-docker-caddy.snippet >> "$CF"
+docker exec <caddy-container> caddy validate --config /etc/caddy/Caddyfile
+docker exec <caddy-container> caddy reload  --config /etc/caddy/Caddyfile
+
+# 4. now it should stay up: a panel that runs only when someone remembers to
+#    start it is one nobody can reach from a phone, which was the point.
+sudo systemctl enable --now rh-oracle-admin
+```
+
+The snippet carries **no** `rate_limit` block, and that is not an oversight:
+it is a third-party module the stock Caddy image does not have, and the
+directive would make `caddy validate` fail and the reload refuse — turning a
+convenience into an outage on a site that was already serving. The panel does
+its own limiting in process instead. The existing oracle block has no
+`rate_limit` either, which is how you can tell.
+
+`ufw` blocks the Docker bridge the same way it does for the API, so allow that
+one path too if it is active:
+
+```bash
+SUBNET=$(docker network inspect <compose-network> \
+  --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+ufw allow from "$SUBNET" to any port 8090 proto tcp comment 'rh-oracle admin from docker'
+```
+
+**What this costs, stated plainly.** The wallet-scoped `BANKR_API_KEY` is now
+loaded in a process that is continuously reachable from the internet, where
+before it ran only while someone was looking at it. The gate is a signature
+from an allowlisted address, and that gate is now the only one. It is a
+reasonable trade for a panel whose daily use is approving text, and it is a
+trade — worth revisiting if the panel ever gains a route that moves funds
+without a second confirmation.
+
 What the panel does, beyond the wallet: a prompt box for **Bankr's own agent**
 (balances, fees, a launch, in plain language — and with a read-write key it
 executes rather than answers, so every prompt is logged against the address

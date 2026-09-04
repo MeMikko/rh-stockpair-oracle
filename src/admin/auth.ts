@@ -3,6 +3,7 @@ import { verifyMessage, type Address } from 'viem';
 import { consumeNonce, issueNonce } from '../auth/session.js';
 import { getDb } from '../db/index.js';
 import { normaliseSubject } from '../entitlements/index.js';
+import { sessionTtlMs } from './exposure.js';
 
 /**
  * Proving you are the operator, not merely a signed-in visitor.
@@ -25,7 +26,6 @@ import { normaliseSubject } from '../entitlements/index.js';
  * rather than defaulting to "anyone who signs in".
  */
 
-const SESSION_TTL_MS = 12 * 60 * 60_000;
 const NONCE_TTL_MS = 10 * 60_000;
 
 const csv = (raw: string | undefined): string[] =>
@@ -84,8 +84,11 @@ export interface AdminSession {
 }
 
 export function mintAdminSession(address: string): string {
+  // TTL comes from the exposure mode: two hours when the panel faces the
+  // internet, twelve on loopback. The window in which a stolen cookie is worth
+  // something should be an evening, not a day.
   const p = b64u(
-    JSON.stringify({ t: 'admin', s: address.toLowerCase(), e: Date.now() + SESSION_TTL_MS }),
+    JSON.stringify({ t: 'admin', s: address.toLowerCase(), e: Date.now() + sessionTtlMs() }),
   );
   return `${p}.${sign(p)}`;
 }
@@ -124,10 +127,11 @@ export function issueAdminNonce(): string {
 /**
  * Check a signature, then spend the nonce.
  *
- * A non-owner is refused before the signature is even checked. Telling them
- * apart costs nothing here — the panel is not reachable from the internet, so
- * there is no enumeration to protect against, and a clear error saves an
- * operator ten minutes when they mistype their own address.
+ * A non-owner is refused before the signature is even checked, and the reason
+ * says which. That reason is precise here and generalised at the HTTP edge
+ * when the panel is published (see admin/exposure.ts): on loopback it saves an
+ * operator ten minutes on a mistyped address; on the internet the same
+ * sentence answers "is this address an owner?" for anyone who asks.
  */
 export async function verifyAdminSignIn(opts: {
   address: string;

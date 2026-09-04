@@ -15,23 +15,44 @@ WorkingDirectory=/opt/rh-oracle
 # can sign, transfer and launch tokens. Only this unit reads the second, which
 # is the whole reason it exists -- rh-oracle-api refuses to start if
 # BANKR_API_KEY reaches its environment.
+# Loopback is the default and stays the default. To publish the panel, set
+# BOTH of these in /opt/rh-oracle/.env.admin (not here -- this file is
+# replaced by every deploy):
+#
+#   ADMIN_HOST=172.18.0.1        the docker gateway Caddy can reach
+#   ADMIN_ALLOW_REMOTE=1
+#
+# The second is not a formality. It is the switch that also forces Secure
+# cookies, shortens the session to two hours, generalises the sign-in error so
+# it stops naming owners, rate limits the sign-in routes, and raises the
+# minimum ADMIN_AUTH_SECRET to 32 characters. Binding outward without it is a
+# refusal to start, not a warning.
 Environment=ADMIN_PORT=8090
 Environment=ADMIN_HOST=127.0.0.1
 EnvironmentFile=/opt/rh-oracle/.env
 EnvironmentFile=/opt/rh-oracle/.env.admin
 
-# Loopback by design: Caddy does not publish this and it must never be given a
-# site block. Reach it with  ssh -L 8090:127.0.0.1:8090 <box>.
+# On loopback, reach it with  ssh -L 8090:127.0.0.1:8090 <box>.
+# Published, Caddy fronts it -- see ops/rh-oracle-admin-docker-caddy.snippet.
 ExecStart=/usr/bin/node --env-file-if-exists=/opt/rh-oracle/.env --env-file-if-exists=/opt/rh-oracle/.env.admin --import tsx scripts/admin.ts
 Restart=on-failure
 RestartSec=5
 
-# Deliberately NOT enabled by default. Start it when you need the panel and
-# stop it when you are done: a process holding the wallet key has no reason to
-# be running while nobody is looking at it.
+# Not enabled by default. On loopback, start it when you need it and stop it
+# when you are done -- a process holding the wallet key has no reason to run
+# while nobody is looking at it:
 #
 #   sudo systemctl start rh-oracle-admin
 #   sudo systemctl stop  rh-oracle-admin
+#
+# Published, that argument inverts: a panel that is only up when someone
+# remembers to start it is a panel nobody can reach from a phone, which was
+# the reason to publish it. Enable it instead:
+#
+#   sudo systemctl enable --now rh-oracle-admin
+#
+# The wallet key is then loaded continuously, which is the cost of the
+# convenience and should be a deliberate choice rather than a side effect.
 
 MemoryMax=512M
 CPUWeight=50

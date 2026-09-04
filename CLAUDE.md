@@ -117,8 +117,12 @@ necessary (none planned).
 - **Two Bankr keys, never one.** The public API holds a gateway-only key
   (`BANKR_LLM_KEY`) and refuses to boot with `BANKR_API_KEY` present; the
   wallet-scoped key lives only in the operator panel (`npm run admin`), which
-  binds loopback, is not published by Caddy, and gates on `ADMIN_ADDRESSES`
-  with its own secret and its own signed message. `npm run bankr:scope`
+  gates on `ADMIN_ADDRESSES` with its own secret and its own signed message.
+  The panel binds loopback by default; `ADMIN_ALLOW_REMOTE=1` publishes it at
+  `admin.sb4s.xyz` and, in the same switch, forces Secure cookies, cuts the
+  session to 2h, rate limits the sign-in routes, stops the sign-in error
+  naming owners, and raises the secret floor to 32 chars. Published, the
+  signature gate is the ONLY gate — see docs/DEPLOY.md. `npm run bankr:scope`
   verifies the split against Bankr rather than against memory.
 - The agent has a wallet of its own; callers' funds are never touched. Say the
   precise thing — "never holds *your* funds" — not the flattering one.

@@ -1,0 +1,54 @@
+# The operator panel, published.
+#
+# Append to the same Caddyfile the oracle site block went into, then reload:
+#
+#   cp <caddyfile> <caddyfile>.bak-$(date +%F)
+#   cat ops/rh-oracle-admin-docker-caddy.snippet >> <caddyfile>
+#   docker exec <caddy-container> caddy validate --config /etc/caddy/Caddyfile
+#   docker exec <caddy-container> caddy reload  --config /etc/caddy/Caddyfile
+#
+# This publishes a panel that can reach a wallet. Before adding it, the panel
+# itself must be in its exposed mode -- ADMIN_HOST set to the same gateway
+# address below and ADMIN_ALLOW_REMOTE=1 in /opt/rh-oracle/.env.admin -- or it
+# will still be bound to loopback and Caddy will get connection refused.
+#
+# Caddy is the only path in. The gateway address is not routable from the
+# internet, so nothing reaches the panel except through this block, which is
+# what makes the X-Forwarded-For the panel rate limits on trustworthy.
+#
+# A DNS A record for admin.sb4s.xyz pointing at this box is the only other
+# prerequisite. Keep it DNS-only (grey cloud) if the zone is on Cloudflare, or
+# read the Cloudflare notes in ops/rh-oracle.caddy.
+
+admin.sb4s.xyz {
+	tls {$ACME_EMAIL}
+	encode zstd gzip
+
+	# NOTE: `rate_limit` is deliberately absent.
+	#
+	# It is a third-party module (caddy-ratelimit) and the stock caddy image
+	# does not carry it — the existing oracle block in this same Caddyfile has
+	# none either, which is the tell. Adding the directive to a Caddy without
+	# the module makes `caddy validate` fail and the reload refuse, taking the
+	# convenience of an already-serving site and turning it into an outage.
+	#
+	# The panel therefore does its own limiting, in process, on exactly the two
+	# routes that must stay open to sign in (see src/admin/rateLimit.ts). If
+	# this Caddy is ever rebuilt with the module — xcaddy with
+	# mholt/caddy-ratelimit — a host-level bound in front of Node is still
+	# worth adding:
+	#
+	#   rate_limit {
+	#       zone admin { key {remote_host}  events 120  window 1m }
+	#   }
+
+	# Match the gateway of the caddy container's network and ADMIN_HOST.
+	reverse_proxy 172.18.0.1:8090
+
+	# Kept separate from the oracle's log: this one records who tried to reach
+	# the wallet, which is worth being able to read on its own.
+	log {
+		output file /var/log/caddy/oracle-admin.log
+		format json
+	}
+}
