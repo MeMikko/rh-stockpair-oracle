@@ -388,6 +388,31 @@ Caddy does not publish it. Reach it through an SSH tunnel:
 ssh -L 8090:127.0.0.1:8090 oracle-box     # then open http://127.0.0.1:8090
 ```
 
+### Three ways to sign in, and why there are three
+
+The gate is always the same check: the server issues a nonce, you sign the
+message, it verifies the signature came from an address in `ADMIN_ADDRESSES`.
+It never sees a key. What differs is only where the signing happens.
+
+1. **Injected wallet** — a browser extension. The default, and nothing to
+   configure.
+2. **WalletConnect** — for signing from a phone or another device. Set
+   `WALLETCONNECT_PROJECT_ID` (cloud.reown.com) and the button appears;
+   leave it empty and it stays hidden. It is off by default on purpose: it
+   loads a third-party SDK onto the one page whose process holds the
+   wallet-scoped Bankr key, and puts someone else's relay in the sign-in path.
+3. **Sign elsewhere and paste it** — needs nothing from the browser at all.
+   Paste an owner address, take the message the panel gives you, sign it in
+   any wallet or with `cast wallet sign`, paste the signature back. This is
+   the route that always works, and the one to reach for when a button will
+   not cooperate.
+
+The gate line under the header says what the browser actually offers —
+whether an injected wallet was detected, whether WalletConnect is configured,
+and whether the page is a secure context, since wallets refuse to connect over
+plain `http`. That line exists because "the button does nothing" was reported
+twice and diagnosed from the outside both times.
+
 ### Two chat boxes, and why they are not the same thing
 
 The panel has both, adjacent and deliberately labelled apart.
