@@ -16,6 +16,7 @@ import {
 import { checkLimit } from './rateLimit.js';
 import { chatTurn, type ChatMessage } from './chat.js';
 import { approveAction, listActions, rejectAction } from './actions.js';
+import { walletConnectBundle } from './vendor.js';
 import { adminKeyConfigured, bankr } from '../../config/bankr.js';
 import {
   BankrError,
@@ -176,6 +177,10 @@ export function buildAdminServer(): FastifyInstance {
     '/admin/logout',
     '/admin/me',
     '/admin/health',
+    // Public library code, and it has to load for someone who is not signed
+    // in — signing in is what it is for. Nothing about this deployment or its
+    // data is in the bundle.
+    '/admin/vendor/walletconnect.js',
   ]);
   app.addHook('preHandler', async (req, reply) => {
     const url = req.routeOptions?.url ?? '';
@@ -213,6 +218,30 @@ export function buildAdminServer(): FastifyInstance {
    * who finds the hostname. The same facts are on /admin/me for a session
    * that has proved who it is.
    */
+  /**
+   * The WalletConnect provider, from this origin rather than a CDN.
+   *
+   * Served before the auth hook could matter: it is public library code, and
+   * it has to load for someone who is not signed in yet — that is the whole
+   * point of it. Nothing about this repository or its data is in the bundle.
+   */
+  app.get('/admin/vendor/walletconnect.js', async (_req, reply) => {
+    if (!adminConfig.walletConnectProjectId) {
+      return reply.code(404).send({ error: 'WalletConnect is not configured on this deployment' });
+    }
+    try {
+      const js = await walletConnectBundle();
+      reply.header('content-type', 'application/javascript; charset=utf-8');
+      // Overrides the no-store default set for the panel's own responses: this
+      // is 2MB of unchanging library code, and re-fetching it on every sign-in
+      // is the difference between a fast panel and a slow one.
+      reply.header('cache-control', 'public, max-age=3600');
+      return js;
+    } catch (err) {
+      return reply.code(500).send({ error: `could not build the bundle: ${(err as Error).message}` });
+    }
+  });
+
   app.get('/admin/health', async () => {
     if (adminExposure() === 'remote') return { ok: true };
     return {
