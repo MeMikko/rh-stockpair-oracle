@@ -50,6 +50,24 @@ export function adminPage(): string {
     <h2>Approval queue</h2>
     <div class="panel" id="queue">…</div>
 
+    <h2>Ask ${agentIdentity.name} <span class="sub">this service's own agent, with this service's data</span></h2>
+    <p class="lede">
+      Free-form. It reads the live index, the recorded price series, the
+      corporate-action calendar, the signal queue and the wallet — by calling
+      tools, so every figure it gives you was looked up during the answer
+      rather than remembered. It cannot trade, publish, or spend. Ask it what
+      something means, not just what it is.
+    </p>
+    <div class="panel">
+      <div id="chatlog"></div>
+      <div class="row"><textarea id="chatin" rows="2" placeholder="why did v4 stop producing measurable rows?"></textarea></div>
+      <div class="row">
+        <button id="chatsend" class="primary">Ask</button>
+        <button id="chatreset">New conversation</button>
+        <span class="sub" id="chatstatus"></span>
+      </div>
+    </div>
+
     <h2>Talk to Bankr <span class="sub">the wallet's agent, not ${agentIdentity.name}</span></h2>
     <p class="lede">
       Plain language to the account that holds the funds: balances, fees, a
@@ -356,6 +374,47 @@ function script(): string {
           (s.queuedAs ? ' (already queued)' : '')+'</option>';
       }).join('');
   }
+
+  /* -------------------------------------------------- ask Vates -- */
+
+  // Kept in the page rather than on the server: the panel holds no
+  // per-operator state, and a reload starting a fresh conversation is the
+  // honest behaviour when nothing was stored.
+  var chatHistory = [];
+
+  function chatAppend(who, text, tools){
+    var d = document.createElement('div');
+    d.className = 'ans';
+    d.innerHTML = '<strong>' + esc(who) + '</strong> ' +
+      (tools && tools.length ? '<span class="sub">' + esc(tools.join(' · ')) + '</span>' : '') +
+      '<div>' + esc(text).replace(/\n/g, '<br>') + '</div>';
+    $('chatlog').appendChild(d);
+    d.scrollIntoView({block:'nearest'});
+  }
+
+  $('chatsend').onclick = async function(){
+    var text = $('chatin').value.trim();
+    if (!text) return;
+    chatAppend('you', text, null);
+    $('chatin').value = '';
+    $('chatstatus').textContent = 'thinking…';
+    var r = await api('/admin/chat', {method:'POST',
+      body: JSON.stringify({message:text, history:chatHistory})});
+    $('chatstatus').textContent = '';
+    if (r.status !== 200){
+      chatAppend('error', r.body.error || 'failed', null);
+      return;
+    }
+    chatHistory = r.body.messages || [];
+    chatAppend('${agentIdentity.name}', r.body.text || '(no answer)', r.body.toolsUsed);
+    if (r.body.truncated) $('chatstatus').textContent = 'stopped after the tool budget ran out';
+  };
+
+  $('chatreset').onclick = function(){
+    chatHistory = [];
+    $('chatlog').innerHTML = '';
+    $('chatstatus').textContent = 'new conversation';
+  };
 
   $('check').onclick = async function(){
     var r = await api('/admin/compose/check', {method:'POST',

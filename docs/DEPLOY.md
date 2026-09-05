@@ -388,6 +388,37 @@ Caddy does not publish it. Reach it through an SSH tunnel:
 ssh -L 8090:127.0.0.1:8090 oracle-box     # then open http://127.0.0.1:8090
 ```
 
+### Two chat boxes, and why they are not the same thing
+
+The panel has both, adjacent and deliberately labelled apart.
+
+**Talk to Bankr** hands your sentence to Bankr's agent, on Bankr's servers,
+with the wallet-scoped key. It knows nothing about this service, and with a
+read-write key it *executes* — "sell all my BNKR" is a trade, not a question.
+Treat it as a command line.
+
+**Ask Vates** runs this service's own identity over this service's own data.
+It answers by calling read-only tools against the live database and the Bankr
+read endpoints, so every figure in an answer was looked up during that answer
+rather than remembered. It cannot trade, publish, or spend: the acting Bankr
+functions are not imported into that module at all, which `test/adminChat.test.ts`
+asserts by reading the source rather than by trusting the prompt.
+
+It needs `BANKR_LLM_KEY`, which the admin unit already has from `.env`. Without
+it the route answers 503 and says so, rather than falling back to something
+that looks like an answer.
+
+Two relaxations worth knowing about, since they are real:
+
+- Unlike the public `/ask` path, the panel chat is **not** held to
+  `verifyDraft` — it may reason, compare and speculate, because nothing it says
+  is published. Anything worth posting still goes through the compose form,
+  where verification runs exactly as before.
+- It can read `README.md`, `CLAUDE.md` and `docs/DEPLOY.md` so it can answer
+  questions about intent and recorded measurements. That is an allowlist by
+  name, not a path argument: the panel is on the internet, and a tool taking a
+  path would be a file-read primitive reachable from a chat box.
+
 ### The sampler is the one timer whose misses cost something
 
 Every other job here recomputes a current fact and can catch up. The sampler
