@@ -5,6 +5,9 @@ import { tokenMeta } from '../registry/tokenMeta.js';
 import { readPoolState, priceFromSqrtX96 } from '../pricing/poolState.js';
 import { readV3PoolState } from '../pricing/poolStateV3.js';
 import { stockContext } from '../pricing/stockContext.js';
+import { pairedUsdReference } from '../pricing/deviation.js';
+import { feedFor } from '../registry/feeds.js';
+import { stockTokenMap } from '../registry/stockTokens.js';
 import { marketStatus } from '../pricing/marketHours.js';
 import { flagForAdjacent } from './priceFlag.js';
 import { withRetry } from '../util/retry.js';
@@ -60,15 +63,31 @@ export interface SamplePool {
 }
 
 /**
- * The pools worth sampling: stock-paired, busiest first.
+ * The pools worth sampling: stock-paired, measurable first, busiest within that.
  *
  * Ordered by measured swaps rather than by liquidity or recency, because a
  * series is only worth its storage where something trades. A pool with no
  * swaps draws a flat line that says nothing about drift.
+ *
+ * Swaps alone were not enough. Ranked purely by them, the sampler spent half
+ * its budget on pools whose drift can never be computed: measured here on
+ * 2026-09-05, 1,368 of 1,372 v4 rows carried no deviation, because the busiest
+ * v4 stock pools are paired against memecoins -- NVDA/HUGGY, QQQ/CAYENNE, a
+ * "Greatest Meme Ever" token whose ticker is GME. Those pools trade, so they
+ * sorted to the top; they have no USD reference, so every row they produced
+ * was excluded from every statistic the series exists to support.
+ *
+ * They are still sampled, last. A price series for them is worth keeping --
+ * it is what /quote answers from, and nobody else records it -- but it must
+ * not crowd out the rows a drift figure can actually come out of.
+ *
+ * "Measurable" is asked of the pricing path (`pairedUsdReference`, `feedFor`)
+ * rather than restated here, so the sampler cannot come to believe a pool is
+ * measurable that computeDeviation will refuse.
  */
 export function poolsToSample(limit: number): SamplePool[] {
   const db = getDb();
-  return db
+  const candidates = db
     .prepare(
       `SELECT * FROM (
          SELECT p.pool_id AS key, 'v4' AS protocol, p.currency0 AS token0, p.currency1 AS token1,
@@ -87,10 +106,23 @@ export function poolsToSample(limit: number): SamplePool[] {
          LEFT JOIN pool_volume v3 ON v3.pool_key = p3.address AND v3.protocol = 'v3'
          WHERE p3.stock_symbol IS NOT NULL
        )
-       ORDER BY swaps DESC, key
-       LIMIT ?`,
+       ORDER BY swaps DESC, key`,
     )
-    .all(limit) as unknown as SamplePool[];
+    .all() as unknown as SamplePool[];
+
+  const stockMap = stockTokenMap();
+  const measurable = (p: SamplePool): boolean =>
+    p.quoteKind === 'stock' &&
+    p.stockSymbol !== null &&
+    p.pairedToken !== null &&
+    feedFor(p.stockSymbol) !== null &&
+    pairedUsdReference(p.pairedToken, stockMap) !== null;
+
+  // A stable partition, so within each tier the swaps ordering above is kept.
+  const first: SamplePool[] = [];
+  const rest: SamplePool[] = [];
+  for (const p of candidates) (measurable(p) ? first : rest).push(p);
+  return first.concat(rest).slice(0, limit);
 }
 
 /** Read one pool's current state and turn it into a row. Writes nothing. */
