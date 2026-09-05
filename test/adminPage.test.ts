@@ -13,9 +13,15 @@ import { adminPage } from '../src/admin/page.js';
  */
 const html = adminPage();
 
-/** Every id="..." in the rendered page, in document order. */
+/**
+ * Every id="..." in the rendered page, in document order.
+ *
+ * The lookbehind matters: \b matches after a hyphen, so a plain \bid= also
+ * picked up data-action-id="…" and reported the template expression inside it
+ * as a duplicate id.
+ */
 function ids(page: string): string[] {
-  return [...page.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1] as string);
+  return [...page.matchAll(/(?<![-\w])id="([^"]+)"/g)].map((m) => m[1] as string);
 }
 
 /** Every id the script looks up through the $ helper. */
@@ -24,6 +30,29 @@ function looked(page: string): string[] {
 }
 
 describe('the admin page', () => {
+  /**
+   * The test that should have existed first.
+   *
+   * The panel's script is a template literal inside a .ts file, so `tsc` type
+   * checks the *string* and never parses the JavaScript in it. Two escaping
+   * mistakes shipped that way and neither was visible to any check here: an
+   * inline onclick whose quote escapes did not survive the template, and
+   * `.replace(/\n/g, ...)` where the template turned the escape into a real
+   * newline and left an unterminated regex.
+   *
+   * A syntax error anywhere in that string does not break one handler. The
+   * whole script fails to parse, so every button on the page is dead —
+   * including sign-in, which is how it presented: "the connect button does
+   * nothing", three times, with three wrong diagnoses.
+   */
+  it('emits JavaScript that actually parses', () => {
+    const script = /<script>([\s\S]*)<\/script>/.exec(html)?.[1];
+    expect(script, 'the page should have an inline script').toBeTruthy();
+    // new Function parses without running: no DOM needed, and a SyntaxError
+    // here is exactly what a browser would raise on load.
+    expect(() => new Function(script as string)).not.toThrow();
+  });
+
   it('gives every element its own id', () => {
     const seen = ids(html);
     const duplicates = seen.filter((id, i) => seen.indexOf(id) !== i);

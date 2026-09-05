@@ -531,7 +531,20 @@ function script(): string {
 
   /* ------------------------------------------- proposed actions -- */
 
-  window.decideAction = async function(id, decision){
+  /**
+   * Delegated, and reading the id from a data attribute.
+   *
+   * The first version built an inline onclick attribute as a string, which
+   * meant escaping quotes through a template literal into a JavaScript string
+   * literal inside an HTML attribute. The escapes did not survive, the
+   * generated script stopped parsing, and every handler on the page died --
+   * not just this one. Nothing here needs a quote inside a quote any more.
+   */
+  $('actions').addEventListener('click', async function(ev){
+    var btn = ev.target.closest('button[data-action-id]');
+    if (!btn) return;
+    var id = btn.getAttribute('data-action-id');
+    var decision = btn.getAttribute('data-decision');
     if (decision === 'approve' &&
         !confirm('Run this against Bankr now? This spends gas and cannot be undone.')) return;
     $('actions').innerHTML = '<span class="sub">working…</span>';
@@ -539,7 +552,7 @@ function script(): string {
       {method:'POST', body: JSON.stringify({decision:decision})});
     if (r.status !== 200) alert(r.body.error || 'failed');
     loadAll();
-  };
+  });
 
   function renderActions(b){
     var list = (b.actions || []);
@@ -556,8 +569,8 @@ function script(): string {
         (a.result ? j(a.result) : '') +
         (pending
           ? '<div class="row">' +
-            '<button class="primary" onclick="decideAction(\'' + esc(a.id) + '\',\'approve\')">Approve and run</button>' +
-            '<button onclick="decideAction(\'' + esc(a.id) + '\',\'reject\')">Reject</button>' +
+            '<button class="primary" data-decision="approve" data-action-id="' + esc(a.id) + '">Approve and run</button>' +
+            '<button data-decision="reject" data-action-id="' + esc(a.id) + '">Reject</button>' +
             '</div>'
           : '') +
         '</div>';
@@ -576,7 +589,7 @@ function script(): string {
     d.className = 'ans';
     d.innerHTML = '<strong>' + esc(who) + '</strong> ' +
       (tools && tools.length ? '<span class="sub">' + esc(tools.join(' · ')) + '</span>' : '') +
-      '<div>' + esc(text).replace(/\n/g, '<br>') + '</div>';
+      '<div>' + esc(text).replace(/\\n/g, '<br>') + '</div>';
     $('chatlog').appendChild(d);
     d.scrollIntoView({block:'nearest'});
   }
