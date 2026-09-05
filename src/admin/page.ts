@@ -75,7 +75,7 @@ export function adminPage(): string {
       <div class="row"><textarea id="ptext" rows="3" placeholder="the post"></textarea></div>
       <div class="row">
         <button id="check">Check the numbers</button>
-        <button id="queue" class="primary">Queue for approval</button>
+        <button id="composequeue" class="primary">Queue for approval</button>
       </div>
       <div id="composeout"></div>
     </div>
@@ -371,7 +371,7 @@ function script(): string {
       + '<details><summary>the numbers this may cite</summary>'+j(r.body.facts)+'</details>';
   };
 
-  $('queue').onclick = async function(){
+  $('composequeue').onclick = async function(){
     var r = await api('/admin/compose', {method:'POST',
       body: JSON.stringify({signalId:$('signal').value, text:$('ptext').value})});
     if (r.status === 200){
