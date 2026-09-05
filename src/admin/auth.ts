@@ -38,6 +38,17 @@ export const adminConfig = {
   secret: process.env.ADMIN_AUTH_SECRET?.trim() ?? '',
   domain: process.env.ADMIN_DOMAIN?.trim() || 'oracle-admin.local',
   owners: csv(process.env.ADMIN_ADDRESSES),
+  /**
+   * WalletConnect project id, for signing from a wallet that is not an
+   * extension in this browser.
+   *
+   * Empty by default, and the button stays hidden when it is: WalletConnect
+   * means loading a third-party SDK onto the one page whose process holds the
+   * wallet-scoped Bankr key, and a relay run by someone else in the sign-in
+   * path. That is a reasonable trade when you need to sign from a phone and a
+   * bad one to make for everybody by default. Get an id at cloud.reown.com.
+   */
+  walletConnectProjectId: process.env.WALLETCONNECT_PROJECT_ID?.trim() ?? '',
 };
 
 export function adminConfigured(): { ok: true } | { ok: false; error: string } {

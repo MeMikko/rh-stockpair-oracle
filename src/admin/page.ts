@@ -25,6 +25,7 @@ export function adminPage(): string {
     <div class="brand"><span class="dot"></span> ${agentIdentity.name} <small>operator panel</small></div>
     <span class="pill" id="who" hidden></span>
     <button id="connect">Connect wallet</button>
+    <button id="wcconnect" hidden>WalletConnect</button>
     <button id="signin" disabled>Sign in</button>
     <button id="signout" hidden>Sign out</button>
   </div>
@@ -34,6 +35,24 @@ export function adminPage(): string {
     Not signed in. This panel holds the wallet-scoped Bankr key; the public API
     process does not. Sign in with an address in <code>ADMIN_ADDRESSES</code>
     (${adminConfig.owners.length} configured).
+    <div class="sub" id="walletdiag">checking what this browser offers…</div>
+
+    <details id="manualsign">
+      <summary>Sign somewhere else and paste it</summary>
+      <p class="lede">
+        No wallet in this browser, or the button will not cooperate. Paste an
+        owner address, sign the message it gives you in any wallet — a phone, a
+        different browser, <code>cast wallet sign</code> — and paste the
+        signature back. This is the same check as the button: the server
+        verifies a signature over a nonce it issued, and never sees a key.
+      </p>
+      <div class="row"><input type="text" id="maddr" placeholder="0x… owner address"></div>
+      <div class="row"><button id="mnonce">Get the message to sign</button></div>
+      <div class="row"><textarea id="mmsg" rows="4" readonly placeholder="the message will appear here"></textarea></div>
+      <div class="row"><input type="text" id="msig" placeholder="0x… signature"></div>
+      <div class="row"><button id="msubmit" class="primary">Sign in with that signature</button></div>
+      <div id="mout"></div>
+    </details>
   </div>
 
   <div id="panel" hidden>
@@ -218,6 +237,100 @@ function script(): string {
     }
   }
 
+  /* ------------------------------------------------- signing in -- */
+
+  /**
+   * Say what this browser actually offers, in the page.
+   *
+   * "The button does nothing" was reported twice and diagnosed twice from the
+   * outside. A line that names what is present turns the next report into a
+   * fact.
+   */
+  (function(){
+    var has = !!window.ethereum;
+    var wc = ${adminConfig.walletConnectProjectId ? 'true' : 'false'};
+    var parts = [has ? 'injected wallet: detected' : 'injected wallet: NONE in this browser'];
+    if (has && window.ethereum.isMetaMask) parts.push('MetaMask');
+    parts.push(wc ? 'WalletConnect: configured' : 'WalletConnect: not configured (set WALLETCONNECT_PROJECT_ID)');
+    if (!window.isSecureContext) parts.push('WARNING: not a secure context — wallets refuse to connect over plain http');
+    $('walletdiag').textContent = parts.join(' · ');
+    if (wc) $('wcconnect').hidden = false;
+    // Opened for whoever has no wallet here, so the way in is visible rather
+    // than hidden behind a disclosure nobody thinks to click.
+    if (!has) $('manualsign').open = true;
+  })();
+
+  /**
+   * Sign from a wallet that is not in this browser.
+   *
+   * The SDK is loaded on demand rather than on every page view: it is
+   * third-party code on the one page whose process holds the wallet-scoped
+   * key, and most sign-ins do not need it.
+   */
+  var wcProvider = null;
+  $('wcconnect').onclick = async function(){
+    $('wcconnect').disabled = true;
+    $('walletdiag').textContent = 'loading WalletConnect…';
+    try {
+      var mod = await import('https://esm.sh/@walletconnect/ethereum-provider@2.17.0');
+      wcProvider = await mod.EthereumProvider.init({
+        projectId: ${JSON.stringify(adminConfig.walletConnectProjectId)},
+        // Robinhood Chain, with Base alongside because the Bankr wallet lives
+        // there too. Signing a message needs neither, but a provider with no
+        // chain refuses to initialise.
+        chains: [4663],
+        optionalChains: [8453, 1],
+        showQrModal: true,
+        metadata: {
+          name: ${JSON.stringify(agentIdentity.name + ' operator panel')},
+          description: 'Sign in to the operator panel',
+          url: location.origin,
+          icons: [],
+        },
+      });
+      await wcProvider.enable();
+      var accts = wcProvider.accounts || [];
+      if (!accts.length){ alert('WalletConnect returned no account.'); return; }
+      account = accts[0];
+      $('connect').textContent = account.slice(0,6)+'…'+account.slice(-4);
+      $('signin').disabled = false;
+      $('walletdiag').textContent = 'WalletConnect: connected as ' + account;
+    } catch(e){
+      $('walletdiag').textContent = 'WalletConnect failed: ' + ((e && (e.message || e.code)) || 'unknown');
+      alert('WalletConnect failed: ' + ((e && (e.message || e.code)) || 'unknown') +
+            '. The paste-a-signature route below needs no wallet in this browser.');
+    } finally {
+      $('wcconnect').disabled = false;
+    }
+  };
+
+  /* --------------------------------- sign elsewhere, paste it back -- */
+
+  var manualNonce = null;
+  $('mnonce').onclick = async function(){
+    var addr = $('maddr').value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)){ $('mout').innerHTML = '<div class="err">that is not an address</div>'; return; }
+    var n = await api('/admin/nonce?address='+encodeURIComponent(addr));
+    if (!n.body || !n.body.message){
+      $('mout').innerHTML = '<div class="err">'+esc((n.body && n.body.error) || 'sign-in is not configured on this server')+'</div>';
+      return;
+    }
+    manualNonce = n.body.nonce;
+    $('mmsg').value = n.body.message;
+    $('mout').innerHTML = '<div class="sub">sign that exact text, then paste the signature</div>';
+  };
+
+  $('msubmit').onclick = async function(){
+    var addr = $('maddr').value.trim();
+    var sig = $('msig').value.trim();
+    if (!manualNonce){ $('mout').innerHTML = '<div class="err">get the message first</div>'; return; }
+    if (!/^0x[0-9a-fA-F]+$/.test(sig)){ $('mout').innerHTML = '<div class="err">that is not a signature</div>'; return; }
+    var v = await api('/admin/verify', {method:'POST',
+      body: JSON.stringify({address:addr, signature:sig, nonce:manualNonce})});
+    if (v.status !== 200){ $('mout').innerHTML = '<div class="err">'+esc(v.body.error || 'sign-in rejected')+'</div>'; return; }
+    refreshMe();
+  };
+
   $('connect').onclick = async function(){
     if (!window.ethereum){
       alert('No injected wallet in this browser. This page needs one to sign in — ' +
@@ -252,7 +365,8 @@ function script(): string {
     if (!n.body || !n.body.message){ alert('sign-in is not configured on this server'); return; }
     var sig;
     try {
-      sig = await window.ethereum.request({method:'personal_sign', params:[n.body.message, account]});
+      var signer = wcProvider || window.ethereum;
+      sig = await signer.request({method:'personal_sign', params:[n.body.message, account]});
     } catch(e){
       if (e && e.code === 4001) alert('You rejected the signature.');
       else if (e && e.code === -32002) alert('The wallet is already asking — answer that request first.');

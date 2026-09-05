@@ -41,6 +41,34 @@ describe('the admin page', () => {
     expect(missing).toEqual([]);
   });
 
+  /**
+   * WalletConnect loads third-party code onto the one page whose process holds
+   * the wallet-scoped Bankr key. Unconfigured, the button must not be offered
+   * at all — an operator clicking a dead button learns nothing, and a page that
+   * reaches for an SDK it has no project id for is worse than one that does not.
+   */
+  it('hides WalletConnect when no project id is configured', () => {
+    expect(html).toContain('id="wcconnect" hidden');
+  });
+
+  /**
+   * The way in that needs nothing from the browser. Whatever is wrong with a
+   * given machine's wallet, the server only ever checks a signature over a
+   * nonce it issued, so signing elsewhere is the same check.
+   */
+  it('offers a sign-elsewhere route that needs no injected wallet', () => {
+    const defined = new Set(ids(html));
+    for (const id of ['manualsign', 'maddr', 'mnonce', 'mmsg', 'msig', 'msubmit', 'mout']) {
+      expect(defined.has(id), `missing #${id}`).toBe(true);
+    }
+  });
+
+  /** Two reports of "the button does nothing" were diagnosed from the outside. */
+  it('says in the page what the browser offers', () => {
+    expect(html).toContain('walletdiag');
+    expect(html).toContain('isSecureContext');
+  });
+
   it('still has the compose controls, under ids of their own', () => {
     const defined = new Set(ids(html));
     for (const id of ['signal', 'ptext', 'check', 'composequeue', 'composeout']) {
