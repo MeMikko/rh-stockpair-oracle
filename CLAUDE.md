@@ -74,9 +74,11 @@ than earn margin; see `config/pricing.ts`.
 - Stock tokens trade 24/5 on-chain; underlying market has hours. When the
   market is closed the on-chain spread widens. Corporate actions reprice
   every pool paired to that stock — NVDA's next dividend touches ~9,900.
-- **v3 carries ~36% of stock-paired volume** (measured twice, two machines:
-  36% and 37%). Four of the five largest stock-paired pools by 24h volume are
-  v3. Any claim of full coverage that indexes v4 alone is false.
+- **v3 carries 36-42% of stock-paired volume by priced USD** (measured three
+  times: 37% and 36% on 2026-09-02, 41.7% on 2026-09-05). By swap count it is
+  30.8%, so any single figure must say which it counts. Four of the five
+  largest stock-paired pools by 24h volume are v3. Any claim of full coverage
+  that indexes v4 alone is false.
 - Bankr's own agent confirmed: nothing exists for stock-paired pricing,
   Chainlink deviation, market-hours status, or corporate-action feeds on RH.
   Agents also lack RH calldata helpers and an RH gas estimator.

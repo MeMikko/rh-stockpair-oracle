@@ -41,12 +41,27 @@ Trust `impact`, not `depth`.
 
 ## Two facts that shape the design
 
-**v3 is not a rounding error.** Measured twice on 2026-09-02, on two machines
-over different windows: locally $151.6M of $409.5M (37%), and on the deployed
-server $160.5M of $447.3M (36%). Four of the five largest stock-paired pools
-by 24h volume are v3, and the most-traded of all by swap count is a v3
-NVDA/USDG pool. A v4-only index would have missed more than a third of the
-subject and still called itself complete.
+**v3 is not a rounding error.** Measured three times, on two machines, over
+different windows — priced USD only, since unpriced pools contribute nothing
+to either side:
+
+| when | v3 | total | v3 share |
+|---|---|---|---|
+| 2026-09-02, local | $151.6M | $409.5M | 37% |
+| 2026-09-02, server | $160.5M | $447.3M | 36% |
+| 2026-09-05, server | $218.46M | $523.88M | **41.7%** |
+
+Four of the five largest stock-paired pools by 24h volume are v3, and the
+most-traded of all by swap count is a v3 NVDA/USDG pool. A v4-only index would
+have missed more than a third of the subject and still called itself complete.
+
+The share is drifting up rather than holding at a third, and total volume grew
+17% in those three days. Both are recorded rather than averaged away: three
+points over three days is a trend nobody should lean on yet, but "about a
+third" is now the bottom of the observed range, not the middle of it. Note
+also that the split differs by what is counted — the same 2026-09-05 run puts
+v3 at 30.8% of *swaps* (1,595,921 of 5,188,023) against 41.7% of dollars, so
+any single "v3 share" figure has to say which.
 
 **Most stock tokens have no oracle.** 194 canonical stock tokens exist on chain
 4663; 35 have a Chainlink feed. For the other 159 a Chainlink deviation is not
@@ -56,8 +71,10 @@ field. `GET /coverage` publishes the split.
 
 **Deviation is only computable when the other side has a USD reference.** A
 memecoin/NVDA pool tells you about the memecoin, not about NVDA. Deviation is
-therefore computed only for stock/USDG and stock/stock pools; everything else
-returns a reason (`paired_token_has_no_usd_reference`). No number is invented.
+therefore computed for stock/USDG, stock/stock and stock/WETH pools — the
+last only where the chain publishes an ETH/USD reference feed, and
+`no_eth_usd_reference_configured` where it does not. Everything else returns
+`paired_token_has_no_usd_reference`. No number is invented.
 
 ## Setup
 
