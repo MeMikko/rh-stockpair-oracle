@@ -39,6 +39,8 @@
     "flag:prices": "node --env-file-if-exists=.env --import tsx scripts/flag-prices.ts"
   },
   "dependencies": {
+    "@walletconnect/ethereum-provider": "^2.24.0",
+    "esbuild": "^0.28.2",
     "fastify": "^5.2.0",
     "tsx": "^4.19.0",
     "viem": "^2.56.1"

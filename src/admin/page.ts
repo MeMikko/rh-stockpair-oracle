@@ -272,14 +272,18 @@ function script(): string {
     $('wcconnect').disabled = true;
     $('walletdiag').textContent = 'loading WalletConnect…';
     try {
-      var mod = await import('https://esm.sh/@walletconnect/ethereum-provider@2.17.0');
+      // From this origin, bundled by this process from node_modules. Not a
+      // CDN: nothing else on this page is fetched from anywhere, and this is
+      // the page whose process holds the wallet-scoped key.
+      var mod = await import('/admin/vendor/walletconnect.js');
       wcProvider = await mod.EthereumProvider.init({
         projectId: ${JSON.stringify(adminConfig.walletConnectProjectId)},
-        // Robinhood Chain, with Base alongside because the Bankr wallet lives
-        // there too. Signing a message needs neither, but a provider with no
-        // chain refuses to initialise.
-        chains: [4663],
-        optionalChains: [8453, 1],
+        // Base as the required chain, matching the sibling app. Signing a
+        // message is chain-agnostic, but a provider must ask for something,
+        // and requiring Robinhood Chain would have most mobile wallets refuse
+        // the session outright — the Bankr wallet is on Base anyway.
+        chains: [8453],
+        optionalChains: [1, 4663],
         showQrModal: true,
         metadata: {
           name: ${JSON.stringify(agentIdentity.name + ' operator panel')},
@@ -288,7 +292,7 @@ function script(): string {
           icons: [],
         },
       });
-      await wcProvider.enable();
+      await wcProvider.connect();
       var accts = wcProvider.accounts || [];
       if (!accts.length){ alert('WalletConnect returned no account.'); return; }
       account = accts[0];

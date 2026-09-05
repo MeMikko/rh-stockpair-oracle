@@ -398,9 +398,19 @@ It never sees a key. What differs is only where the signing happens.
    configure.
 2. **WalletConnect** — for signing from a phone or another device. Set
    `WALLETCONNECT_PROJECT_ID` (cloud.reown.com) and the button appears;
-   leave it empty and it stays hidden. It is off by default on purpose: it
-   loads a third-party SDK onto the one page whose process holds the
-   wallet-scoped Bankr key, and puts someone else's relay in the sign-in path.
+   leave it empty and it stays hidden.
+
+   The id is not a secret and not per-site: one covers this panel and the
+   sibling Next app, which names it `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`.
+   Both names are read here, so a shared `.env` line serves both.
+
+   The provider is **not loaded from a CDN**. It is bundled from this
+   repository's own `node_modules` by the process that serves it, on first
+   request, and cached for the life of the process — see
+   `src/admin/vendor.ts`, which also explains why the published UMD build
+   cannot be used directly. `npm install` plus a unit restart is what picks up
+   a new version. WalletConnect still puts someone else's relay in the sign-in
+   path, which is why it is off by default.
 3. **Sign elsewhere and paste it** — needs nothing from the browser at all.
    Paste an owner address, take the message the panel gives you, sign it in
    any wallet or with `cast wallet sign`, paste the signature back. This is

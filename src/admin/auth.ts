@@ -42,13 +42,23 @@ export const adminConfig = {
    * WalletConnect project id, for signing from a wallet that is not an
    * extension in this browser.
    *
-   * Empty by default, and the button stays hidden when it is: WalletConnect
-   * means loading a third-party SDK onto the one page whose process holds the
-   * wallet-scoped Bankr key, and a relay run by someone else in the sign-in
-   * path. That is a reasonable trade when you need to sign from a phone and a
-   * bad one to make for everybody by default. Get an id at cloud.reown.com.
+   * A project id identifies the application to WalletConnect's relay; it is
+   * not a secret and it is not per-page, so the same one covers this panel,
+   * the public site and sb4s. `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` is read
+   * as well as the plain name, because that is what the sibling Next app
+   * calls it and one `.env` line should serve both rather than drifting into
+   * two ids for one account.
+   *
+   * Empty means the button is not offered. The provider is bundled from this
+   * repository and served from this origin (src/admin/vendor.ts), so nothing
+   * is fetched from a CDN — but WalletConnect still puts someone else's relay
+   * in the sign-in path, which is a reasonable trade to make deliberately and
+   * a poor default. Get an id at cloud.reown.com.
    */
-  walletConnectProjectId: process.env.WALLETCONNECT_PROJECT_ID?.trim() ?? '',
+  walletConnectProjectId:
+    process.env.WALLETCONNECT_PROJECT_ID?.trim() ||
+    process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() ||
+    '',
 };
 
 export function adminConfigured(): { ok: true } | { ok: false; error: string } {
