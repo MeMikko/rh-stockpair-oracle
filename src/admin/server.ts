@@ -14,6 +14,7 @@ import {
   adminExposure, adminExposureConfig, remoteReadiness, secureCookie, sessionTtlMs, signInError,
 } from './exposure.js';
 import { checkLimit } from './rateLimit.js';
+import { chatTurn, type ChatMessage } from './chat.js';
 import { adminKeyConfigured, bankr } from '../../config/bankr.js';
 import {
   BankrError,
@@ -505,6 +506,43 @@ export function buildAdminServer(): FastifyInstance {
       return job;
     } catch (err) {
       return sendBankrError(reply, err);
+    }
+  });
+
+  /**
+   * Vates itself, with this service's data behind it.
+   *
+   * Distinct from /admin/agent/prompt above, which hands the sentence to
+   * BANKR's agent on Bankr's servers. That one knows nothing about this
+   * service and, with a wallet-scoped key, executes rather than answers. This
+   * one runs our own identity over our own database and cannot act at all.
+   *
+   * The history comes back from the client so a conversation can continue
+   * without the panel holding per-operator state. It is not trusted for
+   * anything: every figure in an answer comes from a tool call made during
+   * this request, never from the message list.
+   */
+  app.post('/admin/chat', async (req, reply) => {
+    const b = req.body as { message?: string; history?: ChatMessage[] } | undefined;
+    const message = b?.message?.trim() ?? '';
+    if (!message) return reply.code(400).send({ error: 'body must be {"message": "…"}' });
+    if (message.length > 10_000) {
+      return reply.code(400).send({ error: 'message is too long' });
+    }
+    if (!bankr.llmKey) {
+      return reply.code(503).send({
+        error: 'no BANKR_LLM_KEY in this process — the panel can read data but not talk about it',
+      });
+    }
+    // A long history is a long bill, and a conversation that needs more than
+    // this is one worth restarting with a sharper question.
+    const history = Array.isArray(b?.history) ? b.history.slice(-40) : [];
+    try {
+      const turn = await chatTurn(history, message);
+      req.log.info(`chat by ${owner(req)}: ${message.slice(0, 120)} [${turn.toolsUsed.join(',')}]`);
+      return turn;
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message });
     }
   });
 
