@@ -189,6 +189,46 @@ arithmetic. The `protocol_split` signal therefore publishes only the v3/v4
 split of our own measurement, which is reproducible from our own endpoint, and
 never a comparison against a third party's dashboard.
 
+### What the drift series can and cannot cover
+
+The volume table above already says it: `stock/other token` is the largest
+segment on this chain, $204.0M across 4,589 pools. Those pools are stock
+tokens paired against launchpad tokens, and a deviation against Chainlink
+cannot be computed for any of them. There is no honest USD reference for the
+other side. `/quote` still prices them and `deviation_reason` says
+`paired_token_has_no_usd_reference` rather than returning a number.
+
+That is a limit of the chain, not of the indexer. What was ours was letting it
+consume the sampling budget. `poolsToSample` ranked on swaps alone, and those
+pools trade heavily, so they sorted to the top. Measured on the live database
+2026-09-05:
+
+| protocol | rows | with a measured deviation |
+|---|---|---|
+| v3 | 1,446 | 938 |
+| v4 | 1,372 | **4** |
+
+Four rows out of 1,372. The v4 half of the series was almost entirely pools
+whose drift can never be computed — NVDA paired against HUGGY ("Hugging
+Face"), QQQ against CAYENNEcoin, SLV against CHROME ("Chrome Cat"), and a
+token whose ticker is GME and whose name is "Greatest Meme Ever" paired
+against the actual GME stock token. All are real contracts with real volume;
+none is a dollar.
+
+The sampler now ranks pools whose deviation is computable ahead of ones whose
+is not, keeping the swaps ordering inside each tier. Nothing is dropped — the
+unmeasurable pools are still sampled, last, because their price series is what
+`/quote` answers from and nobody else records it. The measurability test is
+asked of the pricing path (`pairedUsdReference`, `feedFor`) rather than
+restated in the sampler, so the two cannot come to disagree about which pools
+are worth the storage.
+
+**Until the series is re-filled under this ordering, drift statistics on this
+deployment are effectively v3-only.** That is stated here rather than left for
+a reader to infer from a thin v4 sample, and it is a coverage gap in the
+history, not in the indexing: `/quote`, `/trades`, `/gas` and the volume
+measurement cover both protocols as before.
+
 ## Answering, not just posting
 
 The agent has a conversational surface, and it obeys the same rule as the feed:
