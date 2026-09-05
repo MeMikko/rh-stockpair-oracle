@@ -31,6 +31,10 @@ const EXPECTED_TOOLS = [
   'service_overview', 'coverage', 'drift_history', 'volume_split',
   'largest_trades', 'corporate_actions', 'signals_and_queue',
   'bankr_wallet', 'bankr_launches', 'project_doc',
+  // Writes a row for a human to approve. It does not call Bankr; see
+  // src/admin/actions.ts, and the import check below, which is what actually
+  // holds the line.
+  'propose_action', 'pending_actions',
 ];
 
 describe('the tools Vates has', () => {
@@ -61,6 +65,16 @@ describe('the tools Vates has', () => {
     for (const acting of ['deployToken', 'claimFees', 'agentPrompt', 'probeSigning']) {
       expect(code, `${acting} must not be called from the panel chat`).not.toContain(acting);
     }
+
+    // propose_action exists, so the chat can start an action — but only by
+    // writing a row. It must reach actions.ts for proposing and listing, and
+    // never for deciding: approveAction is the function that actually calls
+    // Bankr, and it belongs to the route a human clicks.
+    const fromActions = /import\s*\{([^}]+)\}\s*from\s*'\.\/actions\.js'/.exec(src);
+    const actionImports = (fromActions?.[1] ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    expect(actionImports.sort()).toEqual(['ACTIONS', 'listActions', 'proposeAction']);
+    expect(code, 'the chat must not be able to approve its own proposal')
+      .not.toContain('approveAction');
   });
 
   it('names every tool it dispatches, and dispatches every tool it names', async () => {

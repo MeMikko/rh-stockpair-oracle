@@ -438,3 +438,30 @@ CREATE TABLE IF NOT EXISTS large_swaps (
 );
 CREATE INDEX IF NOT EXISTS large_swaps_symbol ON large_swaps(stock_symbol, block DESC);
 CREATE INDEX IF NOT EXISTS large_swaps_block ON large_swaps(block DESC);
+
+-- Bankr actions Vates proposed and a human has, or has not, approved.
+--
+-- The agent never calls a Bankr function that acts. It writes a row here
+-- saying what it would do and why; the panel renders the parameters verbatim;
+-- approving them runs the call server-side, out of the model's reach. That
+-- ordering is the whole safety property, because tool results already carry
+-- attacker-written text: /token-launches returns tokenName and tokenSymbol
+-- for the 50 most recent launches on Bankr, written by whoever launched them,
+-- and pools on this chain are paired against tokens named things like
+-- "Greatest Meme Ever". With read-only tools the worst such a string can do is
+-- mislead an answer. A human reading the address before anything moves is what
+-- keeps that true once actions exist.
+CREATE TABLE IF NOT EXISTS pending_actions (
+  id          TEXT PRIMARY KEY,
+  kind        TEXT NOT NULL,          -- launch_token | claim_fees
+  params_json TEXT NOT NULL,
+  rationale   TEXT NOT NULL,          -- why the agent thinks this is worth doing
+  status      TEXT NOT NULL,          -- pending | rejected | executed | failed
+  created_at  INTEGER NOT NULL,
+  decided_by  TEXT,
+  decided_at  INTEGER,
+  result_json TEXT,
+  error       TEXT
+);
+CREATE INDEX IF NOT EXISTS pending_actions_status
+  ON pending_actions(status, created_at DESC);

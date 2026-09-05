@@ -50,6 +50,16 @@ export function adminPage(): string {
     <h2>Approval queue</h2>
     <div class="panel" id="queue">…</div>
 
+    <h2>Proposed actions <span class="sub">nothing runs until you approve it</span></h2>
+    <p class="lede">
+      ${agentIdentity.name} cannot call Bankr's acting endpoints. It writes a
+      proposal, and this is where it lands. <strong>Read the parameters, not
+      the reason.</strong> The reason is the agent's; the address is what
+      moves. Approving runs the call from the server with exactly the values
+      shown.
+    </p>
+    <div class="panel" id="actions">…</div>
+
     <h2>Ask ${agentIdentity.name} <span class="sub">this service's own agent, with this service's data</span></h2>
     <p class="lede">
       Free-form. It reads the live index, the recorded price series, the
@@ -209,11 +219,31 @@ function script(): string {
   }
 
   $('connect').onclick = async function(){
-    if (!window.ethereum){ alert('No injected wallet in this browser.'); return; }
-    var a = await window.ethereum.request({method:'eth_requestAccounts'});
-    account = a[0];
-    $('connect').textContent = account.slice(0,6)+'…'+account.slice(-4);
-    $('signin').disabled = false;
+    if (!window.ethereum){
+      alert('No injected wallet in this browser. This page needs one to sign in — ' +
+            'there is no password, only a signature from an owner address.');
+      return;
+    }
+    // Every failure here used to be silent: an unhandled rejection left the
+    // button looking broken. The common one is -32002, which means a previous
+    // request is still open — usually a popup behind the window — and clicking
+    // again can never succeed until that one is dealt with.
+    try {
+      var a = await window.ethereum.request({method:'eth_requestAccounts'});
+      if (!a || !a.length){ alert('The wallet returned no account.'); return; }
+      account = a[0];
+      $('connect').textContent = account.slice(0,6)+'…'+account.slice(-4);
+      $('signin').disabled = false;
+    } catch(e){
+      if (e && e.code === -32002){
+        alert('The wallet is already asking — open the extension and answer the ' +
+              'pending request, then try again.');
+      } else if (e && e.code === 4001){
+        alert('You rejected the connection request.');
+      } else {
+        alert('Wallet error: ' + ((e && (e.message || e.code)) || 'unknown'));
+      }
+    }
   };
 
   $('signin').onclick = async function(){
@@ -223,7 +253,12 @@ function script(): string {
     var sig;
     try {
       sig = await window.ethereum.request({method:'personal_sign', params:[n.body.message, account]});
-    } catch(e){ return; }
+    } catch(e){
+      if (e && e.code === 4001) alert('You rejected the signature.');
+      else if (e && e.code === -32002) alert('The wallet is already asking — answer that request first.');
+      else alert('Signing failed: ' + ((e && (e.message || e.code)) || 'unknown'));
+      return;
+    }
     var v = await api('/admin/verify', {method:'POST', body: JSON.stringify({address:account, signature:sig, nonce:n.body.nonce})});
     if (v.status !== 200){ alert(v.body.error || 'sign-in rejected'); return; }
     refreshMe();
@@ -241,6 +276,7 @@ function script(): string {
   }
 
   function loadAll(){
+    section('actions','/admin/actions', renderActions);
     section('wallet','/admin/wallet', function(b){
       var addr = (b.wallet && b.wallet.wallets ? b.wallet.wallets : []).map(function(w){
         return '<tr><td>'+esc(w.chain)+'</td><td><code>'+esc(w.address)+'</code></td></tr>';
@@ -373,6 +409,41 @@ function script(): string {
         return '<option value="'+esc(s.id)+'">'+esc(s.kind)+' · '+esc(s.summary.slice(0,70))+
           (s.queuedAs ? ' (already queued)' : '')+'</option>';
       }).join('');
+  }
+
+  /* ------------------------------------------- proposed actions -- */
+
+  window.decideAction = async function(id, decision){
+    if (decision === 'approve' &&
+        !confirm('Run this against Bankr now? This spends gas and cannot be undone.')) return;
+    $('actions').innerHTML = '<span class="sub">working…</span>';
+    var r = await api('/admin/actions/'+encodeURIComponent(id)+'/decide',
+      {method:'POST', body: JSON.stringify({decision:decision})});
+    if (r.status !== 200) alert(r.body.error || 'failed');
+    loadAll();
+  };
+
+  function renderActions(b){
+    var list = (b.actions || []);
+    if (!list.length) return '<span class="sub">nothing proposed</span>';
+    return list.map(function(a){
+      var pending = a.status === 'pending';
+      // Parameters first and verbatim: the rationale is the agent's account of
+      // itself, the parameters are what actually runs.
+      return '<div class="ans"><strong>' + esc(a.kind) + '</strong> ' +
+        '<span class="sub">' + esc(a.status) + (a.decidedBy ? ' by ' + esc(a.decidedBy) : '') + '</span>' +
+        j(a.params) +
+        '<div class="sub">reason given: ' + esc(a.rationale) + '</div>' +
+        (a.error ? '<div class="err">' + esc(a.error) + '</div>' : '') +
+        (a.result ? j(a.result) : '') +
+        (pending
+          ? '<div class="row">' +
+            '<button class="primary" onclick="decideAction(\'' + esc(a.id) + '\',\'approve\')">Approve and run</button>' +
+            '<button onclick="decideAction(\'' + esc(a.id) + '\',\'reject\')">Reject</button>' +
+            '</div>'
+          : '') +
+        '</div>';
+    }).join('');
   }
 
   /* -------------------------------------------------- ask Vates -- */
