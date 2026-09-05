@@ -15,6 +15,7 @@ import {
 } from './exposure.js';
 import { checkLimit } from './rateLimit.js';
 import { chatTurn, type ChatMessage } from './chat.js';
+import { approveAction, listActions, rejectAction } from './actions.js';
 import { adminKeyConfigured, bankr } from '../../config/bankr.js';
 import {
   BankrError,
@@ -522,6 +523,31 @@ export function buildAdminServer(): FastifyInstance {
    * anything: every figure in an answer comes from a tool call made during
    * this request, never from the message list.
    */
+  /**
+   * Actions Vates proposed, and the two buttons that decide them.
+   *
+   * Approving sends an id and nothing else. The parameters that execute are
+   * read back from the row, so what runs is what the card displayed — there is
+   * no field here for a caller to substitute, and nothing the model says
+   * between proposal and approval can reach the call.
+   */
+  app.get('/admin/actions', async () => ({ actions: listActions() }));
+
+  app.post('/admin/actions/:id/decide', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const decision = (req.body as { decision?: string } | undefined)?.decision;
+    if (decision !== 'approve' && decision !== 'reject') {
+      return reply.code(400).send({ error: 'body must be {"decision":"approve"|"reject"}' });
+    }
+    try {
+      if (decision === 'reject') return { action: rejectAction(id, owner(req)) };
+      req.log.warn(`action ${id} approved by ${owner(req)} — executing against Bankr`);
+      return { action: await approveAction(id, owner(req)) };
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+  });
+
   app.post('/admin/chat', async (req, reply) => {
     const b = req.body as { message?: string; history?: ChatMessage[] } | undefined;
     const message = b?.message?.trim() ?? '';

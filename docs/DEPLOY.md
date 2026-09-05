@@ -408,6 +408,32 @@ It needs `BANKR_LLM_KEY`, which the admin unit already has from `.env`. Without
 it the route answers 503 and says so, rather than falling back to something
 that looks like an answer.
 
+### Proposed actions
+
+Vates can start a Bankr action but cannot run one. `propose_action` writes a
+row to `pending_actions`; the panel renders its parameters verbatim above the
+chat; approving runs the call **server-side**, reading the parameters back from
+the row. Nothing the model says between proposal and approval reaches the call,
+and the approve button sends an id and nothing else.
+
+Two actions exist, and the pair is the point: there is nothing to claim until
+something has been launched.
+
+| action | parameters | what moves |
+|---|---|---|
+| `launch_token` | `tokenName`, `tokenSymbol`, optional `feeRecipient` | deploys a token; `feeRecipient` decides where the creator share goes, and defaults to the agent's wallet |
+| `claim_fees` | `tokenAddress` | collects the creator share, towards the agent's own wallet |
+
+`feeRecipient` takes a `0x` address only. Bankr also accepts `x`, `farcaster`
+and `ens` recipients; those resolve elsewhere to something the approver cannot
+read off the card, which defeats the card.
+
+**Read the parameters, not the reason.** The rationale is the agent's account
+of itself. The address is what moves. Approval is claimed in the same statement
+that reads the row, so a double-click cannot launch two tokens, and a Bankr
+call that errors is left `failed` rather than returned to `pending` — an action
+whose effect is unknown must not offer a retry button.
+
 Two relaxations worth knowing about, since they are real:
 
 - Unlike the public `/ask` path, the panel chat is **not** held to
