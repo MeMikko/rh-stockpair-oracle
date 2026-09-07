@@ -684,6 +684,12 @@ function page(s: Stats): string {
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
 <meta name="description" content="Pricing and corporate-action data for Robinhood Chain (4663) pools paired against tokenized stocks. Uniswap v4 and v3.">
+<!-- Proves to Virtuals Protocol that whoever registered the agent there also
+     controls this origin. It is a public token, not a credential: it grants
+     nothing, and it is inert to anyone who reads it. Hardcoded rather than
+     read from the environment so a redeploy cannot silently drop the
+     verification and un-list the agent. -->
+<meta name="virtual-protocol-site-verification" content="265f4d0d1820438077fd872cd715f2c8">
 <style>${styles()}</style></head><body>
 
 <header><div class="wrap bar">
